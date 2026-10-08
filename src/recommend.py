@@ -15,7 +15,11 @@ def recommend_for_user(
     data_directory: Path = DATA_DIRECTORY,
     cache_directory: Path = CACHE_DIRECTORY,
     offline: bool = False,
+    *,
+    dataset: MovieDataset | None = None,
+    cold_start: ColdStartRecommender | None = None,
 ) -> dict:
+    """Use the existing routing, optionally reusing resources loaded by a server."""
     if user_id <= 0 or top_k <= 0:
         raise ValueError("User ID and recommendation count must be positive")
 
@@ -26,7 +30,8 @@ def recommend_for_user(
             "recommendations": model.recommend(user_id, top_k).to_dict(orient="records"),
         }
 
-    dataset = MovieDataset(data_directory)
+    if dataset is None:
+        dataset = MovieDataset(data_directory)
     users = dataset.users.loc[dataset.users["user_id"].eq(user_id)]
 
     if not users.empty:
@@ -40,7 +45,8 @@ def recommend_for_user(
             if user_row is not None:
                 seen = set(model.movie_ids[model.seen_movies[user_row]])
 
-            cold_start = ColdStartRecommender(dataset.movies, cache_directory, model=model)
+            if cold_start is None:
+                cold_start = ColdStartRecommender(dataset.movies, cache_directory, model=model)
             result = cold_start.recommend(likes, dislikes, top_k, seen, offline)
             return {"user_id": user_id, "method": "llm_cold_start", **result}
 
