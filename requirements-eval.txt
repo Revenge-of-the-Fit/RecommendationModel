@@ -1,0 +1,8 @@
+pandas>=3.0
+numpy>=2.1
+scipy>=1.15
+scikit-learn>=1.7
+openai>=1.68
+pydantic>=2.10
+python-dotenv>=1.0
+pytest>=8

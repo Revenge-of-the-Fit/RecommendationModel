@@ -9,3 +9,6 @@ models/
 .pytest_cache/
 .idea/
 .vscode/
+external/
+results/
+.cache/
