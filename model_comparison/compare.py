@@ -35,8 +35,8 @@ def adapter_repo_dir(name: str, external_dir: Path) -> str:
 
 def check_prerequisites(models: list[str], external_dir: Path, env) -> None:
     # The key comes first: it is the one thing only the user can supply
-    if "urbonas" in models and not env.get("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY is not set; add it to .env before running Urbonas")
+    if "d-urbonas" in models and not env.get("OPENAI_API_KEY"):
+        raise SystemExit("OPENAI_API_KEY is not set; add it to .env before running d-urbonas")
     for name in models:
         repo = resolve_repo(get_adapter(name).REPO, external_dir)
         if repo and not repo.is_dir():
@@ -83,7 +83,7 @@ def run_comparison(args, runner=run_job) -> dict:
         tables.users.loc[tables.users["self_description_likes"].fillna("").str.strip() != "", "user_id"]
     )
     eligible = [u for u in test_users if u in described]
-    shared_sample = sample_users(eligible, args.urbonas_sample, args.seed)
+    shared_sample = sample_users(eligible, args.d_urbonas_sample, args.seed)
     trainval = pd.concat([train, validation], ignore_index=True)
 
     def make_job(name):
@@ -121,7 +121,7 @@ def run_comparison(args, runner=run_job) -> dict:
         "config": {
             "seed": args.seed, "top_k": args.top_k, "relevance_rating": args.relevance_rating,
             "validation_fraction": args.validation_fraction, "test_fraction": args.test_fraction,
-            "tuning_users": len(tuning_users), "urbonas_sample": args.urbonas_sample,
+            "tuning_users": len(tuning_users), "d_urbonas_sample": args.d_urbonas_sample,
         },
         "split": {
             "training": len(train), "validation": len(validation), "test": len(test),
@@ -147,9 +147,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--tuning-users", type=int, default=200)
-    parser.add_argument("--urbonas-sample", type=int, default=50)
-    parser.add_argument("--models", nargs="+", default=["popularity", "helixan", "rec_zilla", "muhammad", "urbonas"],
-                        choices=["popularity", "helixan", "rec_zilla", "muhammad", "urbonas"])
+    parser.add_argument("--d-urbonas-sample", type=int, default=50)
+    parser.add_argument("--models", nargs="+", default=["popularity", "Helixan", "MajorTomLanded", "MuhammadDF", "d-urbonas"],
+                        choices=["popularity", "Helixan", "MajorTomLanded", "MuhammadDF", "d-urbonas"])
     return parser
 
 

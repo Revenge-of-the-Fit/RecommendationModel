@@ -1,4 +1,4 @@
-"""Urbonas's LLM + embeddings recommender. Uses each user's self-description, never their history.
+"""d-urbonas's LLM + embeddings recommender. Uses each user's self-description, never their history.
 
 The model's code is not edited: its private OpenAI helpers are wrapped with backoff at runtime,
 and its output is cached per user so reruns make no requests for completed users.
@@ -14,8 +14,8 @@ import pandas as pd
 from model_comparison.backoff import with_backoff
 from model_comparison.job import Job, JobResult
 
-NAME = "urbonas"
-REPO = "urbonas"
+NAME = "d-urbonas"
+REPO = "d-urbonas"
 FULL_POPULATION = False
 PARAM_GRID = [{}]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +24,7 @@ QUOTA_MARKERS = {"insufficient_quota", "credit_balance_exhausted"}
 
 def require_api_key() -> None:
     if not os.getenv("OPENAI_API_KEY"):
-        raise RuntimeError("OPENAI_API_KEY is not set; add it to .env before running Urbonas")
+        raise RuntimeError("OPENAI_API_KEY is not set; add it to .env before running d-urbonas")
 
 
 def is_quota_exhausted(error: BaseException) -> bool:
@@ -76,7 +76,7 @@ class JsonCache:
 
 
 def run_with_module(job: Job, module, retriable: tuple, is_fatal=lambda error: False) -> JobResult:
-    cache = JsonCache(Path(job.cache_dir) / "urbonas")
+    cache = JsonCache(Path(job.cache_dir) / "d-urbonas")
     index, ambiguous = build_title_index(job.movies)
     training_counts = job.interactions.groupby("user_id").size().to_dict()
     recommendations, failed, unmapped_total = {}, {}, 0
@@ -132,7 +132,7 @@ def recommend(job: Job) -> JobResult:
 
     # The model needs the working directory changed, so make every path absolute first
     job.cache_dir = str(Path(job.cache_dir).resolve())
-    repo_dir, work = Path(job.repo_dir).resolve(), Path(job.work_dir).resolve() / "urbonas"
+    repo_dir, work = Path(job.repo_dir).resolve(), Path(job.work_dir).resolve() / "d-urbonas"
     (work / "data").mkdir(parents=True)
     movies_sorted = job.movies.sort_values("movie_id").reset_index(drop=True)
     movies_sorted.to_csv(work / "data" / "movies.csv", index=False)
@@ -140,19 +140,19 @@ def recommend(job: Job) -> JobResult:
 
     sys.path.insert(0, str(repo_dir))
     os.chdir(work)  # the model reads data/ and movie_embeddings.npy relative to the cwd
-    import model as urbonas_model  # Urbonas's model.py
+    import model as d_urbonas_model  # d-urbonas's model.py
     import openai
 
     retriable = (openai.RateLimitError, openai.APIConnectionError, openai.APITimeoutError,
                  openai.InternalServerError)
-    urbonas_model._embed = with_backoff(urbonas_model._embed, retriable, give_up=is_quota_exhausted)
-    urbonas_model._get_preferences = with_backoff(
-        urbonas_model._get_preferences, retriable, give_up=is_quota_exhausted
+    d_urbonas_model._embed = with_backoff(d_urbonas_model._embed, retriable, give_up=is_quota_exhausted)
+    d_urbonas_model._get_preferences = with_backoff(
+        d_urbonas_model._get_preferences, retriable, give_up=is_quota_exhausted
     )
 
     if _embeddings_match(repo_dir, movies_sorted):
         shutil.copy(repo_dir / "movie_embeddings.npy", work / "movie_embeddings.npy")
     else:
-        urbonas_model.train_model()  # one-time catalog embedding (~catalog size / 128 requests)
+        d_urbonas_model.train_model()  # one-time catalog embedding (~catalog size / 128 requests)
 
-    return run_with_module(job, urbonas_model, retriable, is_fatal=is_quota_exhausted)
+    return run_with_module(job, d_urbonas_model, retriable, is_fatal=is_quota_exhausted)

@@ -1,11 +1,11 @@
-"""Helixan's EASE recommender, used unmodified from external/helixan/src."""
+"""Helixan's EASE recommender, used unmodified from external/Helixan/src."""
 import sys
 from pathlib import Path
 
 from model_comparison.job import Job, JobResult
 
-NAME = "helixan"
-REPO = "helixan"
+NAME = "Helixan"
+REPO = "Helixan"
 FULL_POPULATION = True
 PARAM_GRID = [
     {"regularization": regularization, "min_rating": min_rating}

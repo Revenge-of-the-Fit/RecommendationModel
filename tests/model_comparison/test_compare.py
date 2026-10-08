@@ -40,7 +40,7 @@ class RecordingRunner:
 
 def args(**overrides):
     values = dict(seed=42, top_k=3, relevance_rating=7, validation_fraction=0.2, test_fraction=0.2,
-                  tuning_users=5, urbonas_sample=4, models=["popularity", "helixan"],
+                  tuning_users=5, d_urbonas_sample=4, models=["popularity", "Helixan"],
                   data_dir=Path("data"), results_dir=Path("results"))
     values.update(overrides)
     return argparse.Namespace(**values)
@@ -64,14 +64,14 @@ def test_tuning_jobs_never_contain_test_data_and_final_jobs_exclude_test(patched
     tables = synthetic_tables()
     train, validation, test = InteractionSplitter(0.2, 0.2, 42).split(build_interactions(tables.events))
     pairs = lambda frame: set(map(tuple, frame[KEYS].to_numpy()))
-    tuning_jobs = [j for j in runner.jobs if len(j.interactions) == len(train) and j.adapter == "helixan"]
-    assert tuning_jobs, "helixan has a grid, so there must be tuning jobs"
+    tuning_jobs = [j for j in runner.jobs if len(j.interactions) == len(train) and j.adapter == "Helixan"]
+    assert tuning_jobs, "Helixan has a grid, so there must be tuning jobs"
     for job in runner.jobs:
         assert not (pairs(job.interactions) & pairs(test))      # test never trains or tunes
     for job in tuning_jobs:
         assert set(job.user_ids) <= set(validation["user_id"])  # tuned on validation users only
     final_jobs = [j for j in runner.jobs if len(j.interactions) == len(train) + len(validation)]
-    assert {j.adapter for j in final_jobs} == {"popularity", "helixan"}
+    assert {j.adapter for j in final_jobs} == {"popularity", "Helixan"}
 
 
 def test_users_without_recommendations_are_scored_zero_and_counted(patched):
@@ -86,7 +86,7 @@ def test_users_without_recommendations_are_scored_zero_and_counted(patched):
 
 
 def test_sample_only_includes_users_with_a_description(patched):
-    payload = compare.run_comparison(args(models=["popularity"], urbonas_sample=100), runner=RecordingRunner())
+    payload = compare.run_comparison(args(models=["popularity"], d_urbonas_sample=100), runner=RecordingRunner())
     assert payload["split"]["sample_users"] <= 14
     assert payload["split"]["test_users_without_description"] >= 0
 
@@ -100,7 +100,7 @@ def test_sample_users_is_seeded_and_capped():
 
 def test_prerequisites_fail_clearly(tmp_path):
     with pytest.raises(SystemExit, match="OPENAI_API_KEY"):
-        compare.check_prerequisites(["urbonas"], tmp_path, env={})
+        compare.check_prerequisites(["d-urbonas"], tmp_path, env={})
     with pytest.raises(SystemExit, match="setup_external"):
-        compare.check_prerequisites(["muhammad"], tmp_path, env={})
+        compare.check_prerequisites(["MuhammadDF"], tmp_path, env={})
     compare.check_prerequisites(["popularity"], tmp_path, env={})  # needs nothing

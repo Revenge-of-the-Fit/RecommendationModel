@@ -3,7 +3,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Models whose code may live in the repo hosting the harness, with a file that proves it
-LOCAL_MARKERS = {"helixan": "src/recommender.py"}
+LOCAL_MARKERS = {"Helixan": "src/recommender.py"}
 
 
 def resolve_repo(repo: str | None, external_dir: Path, project_root: Path = PROJECT_ROOT) -> Path | None:

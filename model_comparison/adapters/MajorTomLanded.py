@@ -1,4 +1,4 @@
-"""rec-zilla's item-similarity recommender, built from the training split only.
+"""MajorTomLanded's item-similarity recommender, built from the training split only.
 
 Run as submitted: its combined matrix includes MovieLens ratings from separate users.
 The neighborhood size is tuned by overriding predict_rating's default argument.
@@ -10,8 +10,8 @@ import pandas as pd
 
 from model_comparison.job import Job, JobResult
 
-NAME = "rec_zilla"
-REPO = "rec-zilla"
+NAME = "MajorTomLanded"
+REPO = "MajorTomLanded"
 FULL_POPULATION = True
 PARAM_GRID = [{"neighborhood_size": n} for n in (5, 10, 25)]
 

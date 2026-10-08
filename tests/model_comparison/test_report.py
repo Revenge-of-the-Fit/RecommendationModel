@@ -12,10 +12,10 @@ def payload():
                   "sample_users": 5, "test_users_without_description": 2},
         "data_sha256": {},
         "models": {
-            "helixan": {"selected_params": {"regularization": 100}, "full_population": METRICS,
+            "Helixan": {"selected_params": {"regularization": 100}, "full_population": METRICS,
                         "shared_sample": METRICS, "drops": {"unknown_ids_dropped": 0, "seen_dropped": 0},
                         "failed_users": {}, "notes": {}},
-            "urbonas": {"selected_params": {}, "full_population": None, "shared_sample": METRICS,
+            "d-urbonas": {"selected_params": {}, "full_population": None, "shared_sample": METRICS,
                         "drops": {"unknown_ids_dropped": 0, "seen_dropped": 0},
                         "failed_users": {7: "RuntimeError: boom"}, "notes": {"unmapped_titles": 3}},
         },
@@ -24,7 +24,7 @@ def payload():
 
 def test_markdown_has_both_tables_and_flags_failures():
     text = render_markdown(payload())
-    assert "helixan" in text and "urbonas" in text
+    assert "Helixan" in text and "d-urbonas" in text
     assert "0.3000" in text                      # ndcg formatted to 4 places
-    assert "not evaluated" in text.lower()       # urbonas has no full-population row
+    assert "not evaluated" in text.lower()       # d_urbonas has no full-population row
     assert "1 failed" in text                    # failure visible in the table

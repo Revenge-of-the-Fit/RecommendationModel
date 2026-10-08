@@ -32,19 +32,19 @@ def assert_valid(result, job):
         assert len(set(movies)) == len(movies)
 
 
-def test_helixan_smoke(real_slice, tmp_path):
-    job = smoke_job("helixan", real_slice, {"regularization": 100, "min_rating": 7}, tmp_path)
+def test_Helixan_smoke(real_slice, tmp_path):
+    job = smoke_job("Helixan", real_slice, {"regularization": 100, "min_rating": 7}, tmp_path)
     assert_valid(run_job(job), job)
 
 
-def test_muhammad_smoke(real_slice, tmp_path):
-    job = smoke_job("muhammad", real_slice, {"n_neighbors": 20}, tmp_path)
+def test_MuhammadDF_smoke(real_slice, tmp_path):
+    job = smoke_job("MuhammadDF", real_slice, {"n_neighbors": 20}, tmp_path)
     assert_valid(run_job(job), job)
 
 
-def test_rec_zilla_smoke(real_slice, tmp_path):
+def test_MajorTomLanded_smoke(real_slice, tmp_path):
     users = [int(u) for u in real_slice["interactions"]["user_id"].unique()[:2]]
-    job = smoke_job("rec_zilla", real_slice, {"neighborhood_size": 10}, tmp_path, user_ids=users)
+    job = smoke_job("MajorTomLanded", real_slice, {"neighborhood_size": 10}, tmp_path, user_ids=users)
     result = run_job(job)
     assert_valid(result, job)
     assert not result.failed_users

@@ -7,23 +7,23 @@ tune on validation, refit on train+validation, score on test once; relevant = ra
 ```bash
 .venv/bin/pip install -r requirements-eval.txt
 scripts/setup_external.sh        # clones the four model repos into external/ (read-only use)
-echo 'OPENAI_API_KEY=...' >> .env   # only needed for the Urbonas model
+echo 'OPENAI_API_KEY=...' >> .env   # only needed for the d-urbonas model
 ```
 
 ## Run
 ```bash
-# cheap dry run: ~20 tuning users, 5 Urbonas users (about 10 OpenAI requests)
-.venv/bin/python -m model_comparison.compare --tuning-users 20 --urbonas-sample 5
+# cheap dry run: ~20 tuning users, 5 d-urbonas users (about 10 OpenAI requests)
+.venv/bin/python -m model_comparison.compare --tuning-users 20 --d-urbonas-sample 5
 
 # full run
 .venv/bin/python -m model_comparison.compare
 ```
-Output: `results/comparison.md` and `results/comparison.json`. Urbonas responses are cached in
-`.cache/urbonas/`; delete that folder if the model or its embeddings change.
+Output: `results/comparison.md` and `results/comparison.json`. d-urbonas responses are cached in
+`.cache/d-urbonas/`; delete that folder if the model or its embeddings change.
 
-Run a subset with `--models popularity helixan`.
+Run a subset with `--models popularity Helixan`.
 
-The Urbonas model needs OpenAI credit. If the account has none, the run stops with a clear
+The d-urbonas model needs OpenAI credit. If the account has none, the run stops with a clear
 message (completed users stay cached, so a rerun resumes).
 
 ## Tests
