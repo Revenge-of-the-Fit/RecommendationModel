@@ -5,7 +5,7 @@ __pycache__/
 .env.*
 !.env.example
 data/
-models/
+/models/
 .pytest_cache/
 .idea/
 .vscode/
