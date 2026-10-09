@@ -143,17 +143,19 @@ class ContainerStorageTests(unittest.TestCase):
                 self.assertEqual(mount["source"], "event_logs")
                 self.assertFalse(mount.get("read_only", False))
 
-    def test_api_can_start_without_kafka_or_openai_credentials(self):
+    def test_api_starts_live_worker_with_optional_openai_credentials(self):
         api = self.configuration["services"]["api"]
         self.assertEqual(set(api["depends_on"]), {"provision"})
-        self.assertNotIn("OPENAI_API_KEY", api["environment"])
+        self.assertEqual(api["environment"]["LIVE_ENABLED"], "1")
+        self.assertIn("OPENAI_API_KEY", api["environment"])
+        self.assertIn("METADATA_BASE_URL", api["environment"])
         self.assertNotIn("KAFKA_CONFIG", api["environment"])
         self.assertFalse(api.get("profiles"))
 
     def test_kafka_can_reach_host_tunnel_and_read_private_config(self):
         kafka = self.configuration["services"]["kafka"]
         self.assertEqual(kafka["network_mode"], "host")
-        self.assertEqual(kafka["profiles"], ["kafka"])
+        self.assertFalse(kafka.get("profiles"))
         self.assertEqual(kafka["user"], "0:10001")
         mount = next(item for item in kafka["volumes"] if item["type"] == "bind")
         self.assertEqual(mount["target"], "/app/kafka-config/mlip-kafka.conf")

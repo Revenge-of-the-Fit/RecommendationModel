@@ -20,6 +20,7 @@ from storage.database import StorageError
 TABLES = (
     "recommendation_requests", "kafka_events", "metadata_fetches", "metadata_snapshots",
     "llm_attempts", "preference_profiles", "profile_uses",
+    "live_users", "live_interactions", "live_event_cursors",
 )
 ARCHIVE_PATTERN = re.compile(r"observations-backup-[0-9]{8}T[0-9]{12}Z-[0-9a-f]{32}\.sqlite3\.gz")
 CHUNK_BYTES = 1024 * 1024
@@ -413,6 +414,8 @@ def _json(value):
 
 
 def _row_times(table, row):
+    if table.startswith("live_"):
+        return None, None
     if table == "recommendation_requests":
         record = _json(row["record_json"])
         return _timestamp(row["started_at"]), _timestamp(record.get("finished_at"))

@@ -32,7 +32,7 @@ def build_parser():
     export.add_argument("--output", type=Path, help="New JSONL path; omit to write records to stdout")
     export.add_argument("--table", choices=TABLES, action="append")
     add_export_filters(export)
-    export.epilog = "Start is inclusive and end exclusive. As-of restricts when stored data became available, independently of event time. Source filters include tables with a source namespace; topic filters include Kafka only. Filtered exports may omit foreign-key dependencies; use an unfiltered backup for complete restoration."
+    export.epilog = "Start is inclusive and end exclusive. As-of restricts when stored data became available, independently of event time. Source filters include tables with a source namespace; topic filters include Kafka only. Current derived live state is excluded from dated exports. Filtered exports may omit foreign-key dependencies; use an unfiltered backup for complete restoration."
     return parser
 
 

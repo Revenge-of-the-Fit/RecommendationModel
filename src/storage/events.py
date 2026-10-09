@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from storage.database import StorageError, open_database
+from storage.live import project_event
 from storage.source_redaction import redact_bytes, redact_headers, redact_source_fields
 
 
@@ -79,7 +80,15 @@ class EventStore:
                 """, (envelope.source_id, envelope.topic, envelope.partition, envelope.offset)).fetchone()[0]
                 if existing != fingerprint:
                     raise StorageError("Kafka offset already contains a different source record")
-        return cursor.rowcount == 1
+            inserted = cursor.rowcount == 1
+            if inserted:
+                self.connection.execute("""
+                    INSERT INTO live_event_cursors(source_id, topic, partition) VALUES (?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                """, (envelope.source_id, envelope.topic, envelope.partition))
+                project_event(self.connection, envelope.source_id, envelope.topic, envelope.partition,
+                              envelope.offset, parsed, envelope.broker_timestamp_ms, envelope.ingested_at)
+        return inserted
 
     def get_event(self, source_id: str, topic: str, partition: int, offset: int) -> dict | None:
         cursor = self.connection.execute("""

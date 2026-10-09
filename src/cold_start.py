@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-from preferences import CACHE_DIRECTORY, ENV_FILE, LLM_MODEL, PreferenceInterpreter
+from preferences import CACHE_DIRECTORY, ENV_FILE, LLM_MODEL, ColdStartError, PreferenceInterpreter
 from storage.profiles import content_version
 from recommender import EaseRecommender
 
@@ -70,19 +70,39 @@ class ColdStartRecommender:
 
         # Reuse the interpretation, but rank again with the current model and seen movies
         saved, cached = self.interpreter.get_profile_record(likes, dislikes, offline, context=context)
-        profile = saved["profile"]
-        provenance = saved.get("_provenance") or {}
+        result = self.recommend_profile(saved, top_k, seen_movie_ids)
+        result["cached"] = cached
+        return result
+
+    def recommend_profile(
+        self, saved_record: dict, top_k: int = 20, seen_movie_ids: set[str] | None = None,
+    ) -> dict:
+        if top_k < 1:
+            raise ValueError("The number of recommendations must be positive")
+        if not isinstance(saved_record, dict) or "profile" not in saved_record:
+            raise ColdStartError("The saved cold-start profile is invalid.")
+        profile = saved_record["profile"]
+        self.interpreter._validate_profile(profile)
+        provenance = saved_record.get("_provenance") or {}
+        if not isinstance(provenance, dict):
+            raise ColdStartError("The saved cold-start profile provenance is invalid.")
+        version = content_version(profile)
+        stored_version = provenance.get("profile_version")
+        if stored_version is not None and stored_version != version:
+            raise ColdStartError("The saved cold-start profile contents have changed.")
+        if saved_record.get("provider_status") not in (None, "completed"):
+            raise ColdStartError("The saved cold-start profile is not completed.")
         seen = set() if seen_movie_ids is None else set(seen_movie_ids)
         recommendations = self._rank_movies(profile, seen, top_k)
 
         return {
             "recommendations": recommendations,
-            "llm_model": saved.get("model") or LLM_MODEL,
-            "cached": cached,
-            "profile_version": content_version(profile),
+            "llm_model": saved_record.get("model") or LLM_MODEL,
+            "cached": True,
+            "profile_version": version,
             "profile_id": provenance.get("profile_id"),
             "llm_attempt_id": provenance.get("attempt_id"),
-            "llm_response_id": saved.get("response_id"),
+            "llm_response_id": saved_record.get("response_id"),
             "prompt_version": provenance.get("prompt_version"),
             "schema_version": provenance.get("schema_version"),
             "profile_origin": provenance.get("origin", "legacy_cache"),

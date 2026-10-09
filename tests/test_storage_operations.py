@@ -372,7 +372,7 @@ class StorageOperationsTests(unittest.TestCase):
         self.assertEqual(attempts, ["pending", "responded"])
         self.assertNotIn("later response", output.getvalue())
         manifest = backup_database(self.path, self.archives)
-        self.assertEqual(manifest["schema_version"], 4)
+        self.assertEqual(manifest["schema_version"], 5)
         restored = self.directory / "all-lineage.sqlite3"
         self.assertEqual(restore_backup(manifest["archive_path"], restored)["foreign_key_violations"], 0)
         recovered = io.StringIO()
@@ -408,7 +408,7 @@ class StorageOperationsTests(unittest.TestCase):
         destination = self.directory / "records.jsonl"
         with redirect_stdout(io.StringIO()):
             self.assertEqual(manage_storage.main(["export", "--storage-path", str(self.path), "--output", str(destination)]), 0)
-        self.assertEqual(len(destination.read_text(encoding="utf-8").splitlines()), 2)
+        self.assertEqual(len(destination.read_text(encoding="utf-8").splitlines()), 5)
         output = io.StringIO()
         with redirect_stdout(output):
             self.assertEqual(manage_storage.main(["backup", "--storage-path", str(self.path), "--archive-dir", str(self.archives)]), 0)
@@ -439,7 +439,9 @@ class StorageOperationsTests(unittest.TestCase):
             with redirect_stdout(output), redirect_stderr(errors):
                 self.assertEqual(manage_storage.main(["export"]), 0)
             raw = [json.loads(line) for line in output.getvalue().splitlines()]
-            self.assertEqual({item["table"] for item in raw}, {"recommendation_requests", "kafka_events"})
+            self.assertEqual({item["table"] for item in raw}, {
+                "recommendation_requests", "kafka_events", "live_users", "live_interactions", "live_event_cursors",
+            })
             self.assertEqual(json.loads(errors.getvalue())["kafka_events"], 1)
             output, errors = io.StringIO(), io.StringIO()
             with redirect_stdout(output), redirect_stderr(errors):

@@ -129,6 +129,20 @@ class PreferenceInterpreter:
 
         context = prepare_metadata_record(context or {})
         with ProfileStore(self.storage_path) as store:
+            # The paid profile survives a crash between its commit and cache publication.
+            if not cache_exists:
+                profile = store.latest_profile(cache_key)
+                if profile is not None and profile["origin"] == "llm" and all(
+                    profile.get("versions", {}).get(name) == versions[name]
+                    for name in ("prompt", "schema", "requested_model")
+                ):
+                    self._validate_profile(profile["profile"])
+                    saved = self._restore_provider_summary({"profile": profile["profile"]}, profile)
+                    saved["_provenance"] = self._profile_reference(profile, versions)
+                    self._validate_reference(saved, cache_key, versions)
+                    self._publish_record(store, cache_path, saved, context, cached=True)
+                    return saved, True
+
             if saved is not None:
                 provenance = saved.get("_provenance") or {}
                 profile = store.get_profile(provenance.get("profile_id"))

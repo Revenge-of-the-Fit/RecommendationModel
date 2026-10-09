@@ -169,6 +169,13 @@ class ProfileStore:
         row = self.connection.execute("SELECT record_json FROM preference_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def latest_profile(self, cache_key):
+        row = self.connection.execute("""
+            SELECT record_json FROM preference_profiles WHERE cache_key=?
+            ORDER BY created_at DESC, profile_id DESC LIMIT 1
+        """, (_identifier(cache_key),)).fetchone()
+        return json.loads(row[0]) if row else None
+
     def list_attempts(self, limit=100):
         if not 1 <= limit <= 10000:
             raise ValueError("The attempt limit must be between 1 and 10000")

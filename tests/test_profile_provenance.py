@@ -355,6 +355,35 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertNotIn("private-cache-exception-secret", json.dumps(attempts + profiles + uses))
         self.assertEqual(list(self.cache.iterdir()), [])
 
+    def test_missing_cache_recovers_audited_profile_without_another_provider_request(self):
+        with self.sdk():
+            original, _ = self.interpreter.get_profile_record("Crime dramas", "Horror")
+        path = self.cache / (original["_provenance"]["cache_key"] + ".json")
+        path.unlink()
+        with patch("preferences.OpenAI", side_effect=AssertionError("Recovery called provider")):
+            recovered, cached = self.new_interpreter().get_profile_record("Crime dramas", "Horror")
+        self.assertTrue(cached)
+        self.assertEqual(recovered, original)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), original)
+        self.assertEqual(len(self.rows("llm_attempts")), 1)
+        self.assertEqual(len(self.rows("preference_profiles")), 1)
+
+    def test_interrupted_cache_publication_recovers_the_successful_paid_response(self):
+        with self.sdk() as (_, create, _):
+            with patch("preferences.os.replace", side_effect=OSError("unpublished-cache")):
+                with self.assertRaises(ColdStartError):
+                    self.interpreter.get_profile_record("Crime dramas", "Horror", context={"user_id": 21})
+            self.assertEqual(create.call_count, 1)
+        with patch("preferences.OpenAI", side_effect=AssertionError("Recovery called provider")):
+            recovered, cached = self.new_interpreter().get_profile_record(
+                "Crime dramas", "Horror", context={"user_id": 21},
+            )
+        self.assertTrue(cached)
+        self.assertEqual(recovered["response_id"], "response-real-1")
+        self.assertEqual(len(self.rows("llm_attempts")), 1)
+        self.assertEqual(len(self.rows("preference_profiles")), 1)
+        self.assertEqual([row["outcome"] for row in self.rows("profile_uses")], ["cache_publish_failed", "available"])
+
     def test_profile_storage_upgrade_preserves_existing_requests(self):
         request = {"request_id": "existing-request", "started_at": "2026-10-09T12:00:00Z", "user_id": 21, "recommendations": []}
         with RequestStore(self.database) as store:

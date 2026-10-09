@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from storage.database import StorageError, open_database
+from storage.live import queue_user
 
 
 LOGGER = logging.getLogger(__name__)
@@ -77,7 +78,10 @@ class RequestStore:
                 ).fetchone()[0]
                 if existing != record[3]:
                     raise StorageError("A request ID already exists with a different record")
-        return cursor.rowcount == 1
+            inserted = cursor.rowcount == 1
+            if inserted:
+                queue_user(self.connection, record[2])
+        return inserted
 
     def get_request(self, request_id: str) -> dict | None:
         row = self.connection.execute(

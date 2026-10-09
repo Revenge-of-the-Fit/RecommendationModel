@@ -38,6 +38,9 @@ services:
       DATA_DIRECTORY: /app/data
       MODEL_PATH: /app/models/recommender.npz
       CACHE_DIRECTORY: /app/state/cache
+      LIVE_ENABLED: "1"
+      METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${OPENAI_TOKEN:-}}
     ports:
       - "8082:8082"
     volumes:
@@ -62,7 +65,6 @@ services:
 
   kafka:
     build: .
-    profiles: ["kafka"]
     # Private configuration is read first; the consumer then switches to UID/GID 10001.
     user: "0:10001"
     # The course broker advertises the host's SSH tunnel on localhost:9092.

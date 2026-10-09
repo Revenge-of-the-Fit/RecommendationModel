@@ -44,11 +44,15 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
         try:
             app.state.service = await asyncio.to_thread(RecommendationService.load, settings)
             app.state.profile_import_error = getattr(app.state.service, "profile_import_error", None)
+            start = getattr(app.state.service, "start", None)
+            if start is not None:
+                await asyncio.to_thread(start)
         except Exception as error:
             LOGGER.error("Serving resources could not be loaded (%s); readiness will return 503", type(error).__name__)
         try:
             yield
         finally:
+            service = app.state.service
             app.state.service = None
             if app.state.request_log is not None:
                 drained = await asyncio.to_thread(
@@ -56,6 +60,9 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
                 )
                 if not drained:
                     LOGGER.error("Request logging shutdown left unpersisted records")
+            close = getattr(service, "close", None)
+            if close is not None and not await asyncio.to_thread(close):
+                LOGGER.warning("Live profile worker stopped before its current preparation finished")
 
     app = LoggedFastAPI(title="Movie Recommendation API", lifespan=lifespan)
     app.state.service = None

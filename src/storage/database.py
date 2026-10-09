@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 
-DATABASE_SCHEMA_VERSION = 4
+DATABASE_SCHEMA_VERSION = 5
 DEFAULT_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "live" / "events.sqlite3"
 
 
@@ -161,6 +161,42 @@ def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
                 connection.execute("""
                     CREATE INDEX profile_uses_by_user_time
                     ON profile_uses(user_id, used_at, use_id)
+                """)
+            if version < 5:
+                connection.execute("""
+                    CREATE TABLE live_interactions (
+                        source_id TEXT NOT NULL, topic TEXT NOT NULL,
+                        user_id INTEGER NOT NULL, movie_id TEXT NOT NULL,
+                        watched INTEGER NOT NULL DEFAULT 0,
+                        rating INTEGER, rating_order TEXT NOT NULL DEFAULT '',
+                        PRIMARY KEY(source_id, topic, user_id, movie_id)
+                    ) WITHOUT ROWID
+                """)
+                connection.execute("""
+                    CREATE TABLE live_users (
+                        user_id INTEGER PRIMARY KEY,
+                        priority INTEGER NOT NULL DEFAULT 1,
+                        next_attempt_at REAL NOT NULL DEFAULT 0,
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        interpretation_version TEXT NOT NULL DEFAULT '',
+                        last_error TEXT, record_json TEXT
+                    )
+                """)
+                connection.execute("CREATE INDEX live_users_due ON live_users(next_attempt_at, priority, user_id)")
+                connection.execute("""
+                    CREATE TABLE live_event_cursors (
+                        source_id TEXT NOT NULL, topic TEXT NOT NULL,
+                        partition INTEGER NOT NULL, last_offset INTEGER NOT NULL DEFAULT -1,
+                        PRIMARY KEY(source_id, topic, partition)
+                    ) WITHOUT ROWID
+                """)
+                connection.execute("""
+                    INSERT INTO live_event_cursors(source_id, topic, partition)
+                    SELECT DISTINCT source_id, topic, partition FROM kafka_events
+                """)
+                connection.execute("""
+                    INSERT INTO live_users(user_id)
+                    SELECT DISTINCT user_id FROM recommendation_requests WHERE user_id IS NOT NULL
                 """)
             connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
             connection.commit()
