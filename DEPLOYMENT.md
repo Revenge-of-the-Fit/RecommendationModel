@@ -29,6 +29,12 @@ docker compose exec api cat /app/models/artifact-manifest.json
 Also test `http://<VM-address>:8082/recommend/1` from outside the VM. Allow inbound TCP
 port `8082` in the VM firewall if required.
 
+Example for our VM:
+```bash
+curl.exe -i http://CMU-ONLINE-MLIP-VM02.ANDREW.CMU.EDU:8082/health/ready
+curl.exe -i http://CMU-ONLINE-MLIP-VM02.ANDREW.CMU.EDU:8082/recommend/1
+```
+
 To confirm profile state survives container replacement:
 
 ```bash
