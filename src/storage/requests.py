@@ -2,19 +2,16 @@ import json
 import logging
 import queue
 import re
-import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+
+from storage.database import StorageError, open_database
 
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 REDACTED = "[redacted]"
-
-
-class StorageError(RuntimeError):
-    pass
 
 
 def redact_sensitive_fields(value):
@@ -61,33 +58,7 @@ def prepare_request(record: dict) -> tuple[str, str, int | None, str]:
 class RequestStore:
     def __init__(self, path: Path, busy_timeout: float = 1.0):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path, timeout=busy_timeout)
-        try:
-            mode = self.connection.execute("PRAGMA journal_mode=WAL").fetchone()[0]
-            if mode != "wal":
-                raise StorageError("Request storage requires a file-backed WAL database")
-            self.connection.execute("PRAGMA synchronous=FULL")
-            version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (0, SCHEMA_VERSION):
-                raise StorageError("Unsupported request storage schema version")
-            with self.connection:
-                self.connection.execute("""
-                    CREATE TABLE IF NOT EXISTS recommendation_requests (
-                        request_id TEXT PRIMARY KEY NOT NULL,
-                        started_at TEXT NOT NULL,
-                        user_id INTEGER,
-                        record_json TEXT NOT NULL
-                    )
-                """)
-                self.connection.execute("""
-                    CREATE INDEX IF NOT EXISTS requests_by_user_time
-                    ON recommendation_requests(user_id, started_at, request_id)
-                """)
-                self.connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        except Exception:
-            self.connection.close()
-            raise
+        self.connection = open_database(self.path, busy_timeout)
 
     def save_request(self, record: dict) -> bool:
         return self.save_prepared(prepare_request(record))

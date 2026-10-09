@@ -6,3 +6,4 @@ scikit-learn
 fastapi==0.142.2
 pydantic==2.13.5
 uvicorn==0.54.0
+confluent-kafka==2.15.1
