@@ -1,3 +1,5 @@
+import hashlib
+import json
 import re
 import unicodedata
 from pathlib import Path
@@ -72,6 +74,9 @@ class ColdStartRecommender:
             "recommendations": recommendations,
             "llm_model": LLM_MODEL,
             "cached": cached,
+            "profile_version": "sha256:" + hashlib.sha256(
+                json.dumps(profile, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
         }
 
     @staticmethod

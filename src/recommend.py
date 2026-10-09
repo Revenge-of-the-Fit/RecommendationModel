@@ -53,6 +53,7 @@ def recommend_for_user(
     return {
         "user_id": user_id,
         "method": "popularity",
+        "fallback_reason": "user_not_in_dataset" if users.empty else "no_description_or_positive_history",
         "recommendations": model.recommend(user_id, top_k).to_dict(orient="records"),
     }
 

@@ -11,12 +11,17 @@ class Recommendation(BaseModel):
     movie_id: str = Field(min_length=1, pattern=r"^[^,\s]+$")
     title: str
     score: float
+    reason: str | None = None
 
 
 class RecommendationResult(BaseModel):
     user_id: PositiveInt
     method: Literal["ease", "llm_cold_start", "popularity"]
     recommendations: list[Recommendation] = Field(min_length=1, max_length=20)
+    fallback_reason: str | None = None
+    cached: bool | None = None
+    llm_model: str | None = None
+    profile_version: str | None = None
 
     @field_validator("recommendations")
     @classmethod

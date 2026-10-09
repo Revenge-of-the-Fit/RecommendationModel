@@ -7,6 +7,7 @@ from models.settings import ServingSettings
 from preferences import ColdStartError
 from recommend import recommend_for_user
 from recommender import EaseRecommender
+from services.versions import dataset_version, file_version
 
 
 class RecommendationService:
@@ -15,10 +16,12 @@ class RecommendationService:
         model: EaseRecommender,
         dataset: MovieDataset,
         cold_start: ColdStartRecommender,
+        versions: dict[str, str] | None = None,
     ):
         self.model = model
         self.dataset = dataset
         self.cold_start = cold_start
+        self.versions = versions or {}
 
     @classmethod
     def load(cls, settings: ServingSettings) -> "RecommendationService":
@@ -29,7 +32,10 @@ class RecommendationService:
         cold_start = ColdStartRecommender(
             dataset.movies, settings.cache_directory, model=model
         )
-        return cls(model, dataset, cold_start)
+        return cls(model, dataset, cold_start, versions={
+            "model": file_version(settings.model_path),
+            "dataset": dataset_version(settings.data_directory),
+        })
 
     def recommend(self, user_id: int) -> RecommendationResult:
         try:
@@ -46,6 +52,7 @@ class RecommendationService:
             result = {
                 "user_id": user_id,
                 "method": "popularity",
+                "fallback_reason": "cold_start_profile_unavailable",
                 "recommendations": self.model.recommend(user_id, 20).to_dict(orient="records"),
             }
         return RecommendationResult.model_validate(result)
