@@ -1,0 +1,62 @@
+services:
+  provision:
+    build: .
+    command: ["python", "scripts/provision.py"]
+    environment:
+      APP_REVISION: ${APP_REVISION:-unknown}
+      DATA_DIRECTORY: /app/data
+      MODEL_PATH: /app/models/recommender.npz
+      ARTIFACT_MANIFEST_PATH: /app/models/artifact-manifest.json
+      RETRAIN_MODEL: ${RETRAIN_MODEL:-0}
+    volumes:
+      - catalog:/app/data
+      - model:/app/models
+    restart: "no"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build: .
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    environment:
+      DATA_DIRECTORY: /app/data
+      MODEL_PATH: /app/models/recommender.npz
+      CACHE_DIRECTORY: /app/state/cache
+    ports:
+      - "8082:8082"
+    volumes:
+      - catalog:/app/data:ro
+      - model:/app/models:ro
+      - cold_start_cache:/app/state/cache
+      - event_logs:/app/state/events
+      - live_profiles:/app/state/profiles
+      - worker_state:/app/state/worker
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8082/health/ready', timeout=2)"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  catalog:
+  model:
+  cold_start_cache:
+  event_logs:
+  live_profiles:
+  worker_state:
