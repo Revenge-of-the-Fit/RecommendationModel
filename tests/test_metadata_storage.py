@@ -274,7 +274,7 @@ class MetadataStorageTests(unittest.TestCase):
         with MetadataStore(self.path) as store:
             store.save_fetch(metadata_fetch(), [metadata_snapshot()])
         with closing(sqlite3.connect(self.path)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 3)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 4)
             self.assertEqual(connection.execute("SELECT * FROM recommendation_requests").fetchall(), request_before)
             self.assertEqual(connection.execute("SELECT * FROM kafka_events").fetchall(), kafka_before)
         with RequestStore(self.path) as requests:

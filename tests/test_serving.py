@@ -7,11 +7,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+from fastapi.testclient import TestClient
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from cold_start import ColdStartRecommender
+from api.app import create_app
 from dataset import MovieDataset
 from models.settings import ServingSettings
 from recommender import EaseRecommender
@@ -86,7 +88,9 @@ class ServingProvenanceTests(unittest.TestCase):
             "liked_titles": [], "disliked_titles": [],
             "likes_summary": "Family drama", "dislikes_summary": "Ghost stories",
         }
-        preparer = ColdStartRecommender(self.movies, self.settings.cache_directory, model=self.model)
+        preparer = ColdStartRecommender(
+            self.movies, self.settings.cache_directory, model=self.model, storage_path=self.settings.storage_path,
+        )
         with patch.object(preparer.interpreter, "_request", return_value={"profile": profile}):
             prepared = preparer.recommend("Drama", "Horror")
         service = RecommendationService.load(self.settings)
@@ -101,7 +105,28 @@ class ServingProvenanceTests(unittest.TestCase):
         saved = json.loads(cache_file.read_text(encoding="utf-8"))
         saved["profile"]["likes_summary"] = "Detective investigations"
         cache_file.write_text(json.dumps(saved), encoding="utf-8")
-        self.assertNotEqual(service.recommend(42).profile_version, result.profile_version)
+        fallback = service.recommend(42)
+        self.assertEqual(fallback.method, "popularity")
+        self.assertEqual(fallback.fallback_reason, "cold_start_profile_unavailable")
+        self.assertIsNone(fallback.profile_version)
+        self.assertIsNone(fallback.profile_id)
+
+    def test_profile_import_failure_preserves_warm_serving_and_is_visible_in_storage_health(self):
+        app = create_app(self.settings)
+        with patch("preferences.PreferenceInterpreter.import_cache_profiles", side_effect=OSError("password=private-import-secret")):
+            with patch("preferences.PreferenceInterpreter._request", side_effect=AssertionError("serving called LLM")):
+                with self.assertLogs("services.recommendation", level="ERROR") as logged:
+                    with TestClient(app) as client:
+                        self.assertEqual(client.get("/health/ready").status_code, 200)
+                        response = client.get("/recommend/1")
+                        health = client.get("/health/storage")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text.split(","), self.model.recommend(1, 20)["movie_id"].tolist())
+        self.assertEqual(health.status_code, 503)
+        self.assertFalse(health.json()["healthy"])
+        self.assertEqual(health.json()["profile_import_error"], "OSError")
+        self.assertNotIn("private-import-secret", health.text)
+        self.assertNotIn("private-import-secret", "\n".join(logged.output))
 
     def test_source_version_handles_line_endings_and_detects_changes(self):
         source = self.directory / "source"

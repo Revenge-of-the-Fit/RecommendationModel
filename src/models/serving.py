@@ -22,6 +22,12 @@ class RecommendationResult(BaseModel):
     cached: bool | None = None
     llm_model: str | None = None
     profile_version: str | None = None
+    profile_id: str | None = None
+    llm_attempt_id: str | None = None
+    llm_response_id: str | None = None
+    prompt_version: str | None = None
+    schema_version: str | None = None
+    profile_origin: Literal["llm", "legacy_cache"] | None = None
 
     @field_validator("recommendations")
     @classmethod

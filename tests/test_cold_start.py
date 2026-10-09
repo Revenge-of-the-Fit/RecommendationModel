@@ -33,7 +33,9 @@ class ColdStartTests(unittest.TestCase):
             ],
             columns=["movie_id", "title", "genres", "overview"],
         )
-        self.recommender = ColdStartRecommender(self.movies, self.cache_directory)
+        self.recommender = ColdStartRecommender(
+            self.movies, self.cache_directory, storage_path=self.cache_directory / "records.sqlite3",
+        )
         self.interpreter = self.recommender.interpreter
         self.profile = {
             "liked_genres": ["Crime", "Drama"],

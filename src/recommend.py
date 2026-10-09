@@ -47,7 +47,8 @@ def recommend_for_user(
 
             if cold_start is None:
                 cold_start = ColdStartRecommender(dataset.movies, cache_directory, model=model)
-            result = cold_start.recommend(likes, dislikes, top_k, seen, offline)
+            context = {} if offline else {"context": {"user_id": user_id}}
+            result = cold_start.recommend(likes, dislikes, top_k, seen, offline, **context)
             return {"user_id": user_id, "method": "llm_cold_start", **result}
 
     return {

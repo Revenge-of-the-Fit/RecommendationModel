@@ -1,0 +1,161 @@
+x-storage-environment: &storage-environment
+  STORAGE_PATH: /app/state/events/events.sqlite3
+  STORAGE_BUSY_TIMEOUT: ${STORAGE_BUSY_TIMEOUT:-1}
+  STORAGE_MAX_BYTES: ${STORAGE_MAX_BYTES:-17179869184}
+  STORAGE_MIN_FREE_BYTES: ${STORAGE_MIN_FREE_BYTES:-1073741824}
+
+x-bounded-logging: &bounded-logging
+  driver: local
+  options:
+    max-size: "10m"
+    max-file: "3"
+    compress: "true"
+
+services:
+  provision:
+    build: .
+    command: ["python", "scripts/provision.py"]
+    environment:
+      APP_REVISION: ${APP_REVISION:-unknown}
+      DATA_DIRECTORY: /app/data
+      MODEL_PATH: /app/models/recommender.npz
+      ARTIFACT_MANIFEST_PATH: /app/models/artifact-manifest.json
+      RETRAIN_MODEL: ${RETRAIN_MODEL:-0}
+    volumes:
+      - catalog:/app/data
+      - model:/app/models
+    restart: "no"
+    logging: *bounded-logging
+
+  api:
+    build: .
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    environment:
+      <<: *storage-environment
+      APP_REVISION: ${APP_REVISION:-unknown}
+      DATA_DIRECTORY: /app/data
+      MODEL_PATH: /app/models/recommender.npz
+      CACHE_DIRECTORY: /app/state/cache
+    ports:
+      - "8082:8082"
+    volumes:
+      - catalog:/app/data:ro
+      - model:/app/models:ro
+      - cold_start_cache:/app/state/cache
+      - event_logs:/app/state/events
+      - live_profiles:/app/state/profiles
+      - worker_state:/app/state/worker
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "from urllib.request import urlopen; urlopen('http://127.0.0.1:8082/health/ready', timeout=2)"
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    logging: *bounded-logging
+
+  kafka:
+    build: .
+    profiles: ["kafka"]
+    # Private configuration is read first; the consumer then switches to UID/GID 10001.
+    user: "0:10001"
+    # The course broker advertises the host's SSH tunnel on localhost:9092.
+    network_mode: host
+    command:
+      - sh
+      - -c
+      - 'umask 0002; exec "$$@"'
+      - --
+      - python
+      - src/consume_events.py
+      - --config
+      - /app/kafka-config/mlip-kafka.conf
+      - --topic
+      - movielog2
+      - --source-id
+      - cmu-movielog
+      - --group-id
+      - ${KAFKA_GROUP_ID:-team2-issue4}
+      - --event-timezone
+      - ${KAFKA_EVENT_TIMEZONE:-UTC}
+      - --run-as-uid
+      - "10001"
+      - --run-as-gid
+      - "10001"
+    environment: *storage-environment
+    volumes:
+      - event_logs:/app/state/events
+      - type: bind
+        source: ${KAFKA_CONFIG_DIRECTORY:-${HOME:-.}/.config}/mlip-kafka.conf
+        target: /app/kafka-config/mlip-kafka.conf
+        read_only: true
+        bind:
+          create_host_path: false
+    restart: unless-stopped
+    logging: *bounded-logging
+
+  storage-maintenance:
+    build: .
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["python", "scripts/storage_maintenance.py"]
+    environment:
+      <<: *storage-environment
+      ARCHIVE_DIRECTORY: /app/state/archives
+      STORAGE_BACKUP_INTERVAL_HOURS: ${STORAGE_BACKUP_INTERVAL_HOURS:-24}
+      STORAGE_BACKUP_RETAIN: ${STORAGE_BACKUP_RETAIN:-7}
+      STORAGE_MIN_FREE_BYTES: ${STORAGE_MIN_FREE_BYTES:-1073741824}
+      STORAGE_MAX_DATABASE_BYTES: ${STORAGE_MAX_DATABASE_BYTES:-17179869184}
+      STORAGE_MAX_ARCHIVE_BYTES: ${STORAGE_MAX_ARCHIVE_BYTES:-34359738368}
+    volumes:
+      - event_logs:/app/state/events
+      - event_archives:/app/state/archives
+    restart: unless-stopped
+    logging: *bounded-logging
+
+  profiles-preparation:
+    build: .
+    profiles: ["profiles"]
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+    command:
+      - python
+      - src/prepare_cold_start.py
+      - --data-dir
+      - /app/data
+      - --cache-dir
+      - /app/state/cache
+      - --model-path
+      - /app/models/recommender.npz
+      - --storage-path
+      - /app/state/events/events.sqlite3
+      - --limit
+      - ${PROFILE_PREPARATION_LIMIT:-50}
+    environment:
+      <<: *storage-environment
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      APP_REVISION: ${APP_REVISION:-unknown}
+    volumes:
+      - catalog:/app/data:ro
+      - model:/app/models:ro
+      - cold_start_cache:/app/state/cache
+      - event_logs:/app/state/events
+    restart: "no"
+    logging: *bounded-logging
+
+volumes:
+  catalog:
+  model:
+  cold_start_cache:
+  event_logs:
+  event_archives:
+  live_profiles:
+  worker_state:

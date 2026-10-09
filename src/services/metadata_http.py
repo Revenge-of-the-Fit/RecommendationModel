@@ -28,12 +28,15 @@ _DIAGNOSTIC_FILTER = _DiagnosticFilter()
 
 
 @contextmanager
-def _quiet_http():
+def _quiet_http(*extra_names):
     with _DIAGNOSTIC_LOCK:
         names = {
             "httpx", "httpcore", "httpcore.connection", "httpcore.http11",
             "httpcore.http2", "httpcore.proxy", "httpcore.socks",
-            *[name for name in list(logging.Logger.manager.loggerDict) if name.startswith(("httpx.", "httpcore."))],
+            *extra_names,
+            *[name for name in list(logging.Logger.manager.loggerDict) if name.startswith(
+                ("httpx.", "httpcore.", *(value + "." for value in extra_names))
+            )],
         }
         for name in names:
             logger = logging.getLogger(name)

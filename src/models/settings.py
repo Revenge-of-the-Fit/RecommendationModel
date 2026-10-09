@@ -20,6 +20,8 @@ class ServingSettings(BaseModel):
     storage_path: Path = DEFAULT_STORAGE_PATH
     request_log_queue_size: int = Field(default=1024, gt=0)
     storage_busy_timeout: float = Field(default=1.0, gt=0, allow_inf_nan=False)
+    storage_max_bytes: int = Field(default=16 * 1024**3, gt=0)
+    storage_min_free_bytes: int = Field(default=1024**3, ge=0)
     request_log_shutdown_timeout: float = Field(default=5.0, gt=0, allow_inf_nan=False)
 
     @classmethod

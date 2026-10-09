@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from storage.requests import REDACTED, redact_sensitive_fields
+from storage.operations import capacity_status
 
 
 LOGGER = logging.getLogger(__name__)
@@ -82,6 +83,17 @@ def storage_status(state) -> dict:
     status["healthy"] = status["healthy"] and not status["capture_failed"] and not status["unavailable"]
     if state.request_log_error is not None:
         status["last_error"] = state.request_log_error
+    settings = getattr(state, "settings", None)
+    if settings is not None:
+        capacity = capacity_status(
+            settings.storage_path, min_free_bytes=settings.storage_min_free_bytes,
+            max_database_bytes=settings.storage_max_bytes,
+        )
+        status["capacity"] = capacity
+        status["healthy"] = status["healthy"] and capacity["healthy"]
+    profile_error = getattr(state, "profile_import_error", None)
+    status["profile_import_error"] = profile_error
+    status["healthy"] = status["healthy"] and profile_error is None
     return status
 
 
@@ -173,6 +185,11 @@ class RequestLoggingMiddleware:
                     "fallback_reason": result.fallback_reason if successful else None,
                     "cached": result.cached if successful else None,
                     "llm_model": result.llm_model if successful else None,
+                    "profile_reference": {
+                        "profile_id": result.profile_id, "attempt_id": result.llm_attempt_id,
+                        "response_id": result.llm_response_id, "origin": result.profile_origin,
+                        "prompt_version": result.prompt_version, "schema_version": result.schema_version,
+                    } if successful and result.method == "llm_cold_start" else None,
                     "status": status,
                     "error_type": error_type or state.get("error_type") or (
                         "RequestValidationError" if status == 422 else

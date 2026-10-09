@@ -117,6 +117,28 @@ class ApiRequestLoggingTests(unittest.TestCase):
         self.assertIsNotNone(finished.utcoffset())
         self.assertGreaterEqual(finished, started)
 
+    def test_cached_cold_start_response_retains_profile_and_provider_references(self):
+        self.service.recommend.return_value = recommendation_result(
+            method="llm_cold_start", cached=True, fallback_reason=None,
+            profile_id="profile-1", llm_attempt_id="attempt-1",
+            llm_response_id="response-1", llm_model="provider-model-snapshot",
+            profile_origin="llm", prompt_version="sha256:prompt", schema_version="sha256:schema",
+        )
+        with patch("api.app.RecommendationService.load", return_value=self.service):
+            with TestClient(create_app(self.settings)) as client:
+                response = client.get("/recommend/42")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.text, "movie_b,movie_a")
+        record = self.read_request(response)
+        self.assertEqual(record["serving_method"], "llm_cold_start")
+        self.assertTrue(record["cached"])
+        self.assertEqual(record["llm_model"], "provider-model-snapshot")
+        self.assertEqual(record["profile_reference"], {
+            "profile_id": "profile-1", "attempt_id": "attempt-1", "response_id": "response-1",
+            "origin": "llm", "prompt_version": "sha256:prompt", "schema_version": "sha256:schema",
+        })
+        self.assertEqual(record["versions"]["profile"], "profile-3")
+
     def test_each_request_generates_a_distinct_id(self):
         with patch("api.app.RecommendationService.load", return_value=self.service):
             with TestClient(create_app(self.settings)) as client:

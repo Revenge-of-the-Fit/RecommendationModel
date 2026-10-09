@@ -1,5 +1,3 @@
-import hashlib
-import json
 import re
 import unicodedata
 from pathlib import Path
@@ -9,6 +7,7 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from preferences import CACHE_DIRECTORY, ENV_FILE, LLM_MODEL, PreferenceInterpreter
+from storage.profiles import content_version
 from recommender import EaseRecommender
 
 
@@ -21,13 +20,15 @@ class ColdStartRecommender:
         cache_directory: Path = CACHE_DIRECTORY,
         env_file: Path = ENV_FILE,
         model: EaseRecommender | None = None,
+        *,
+        storage_path: Path | None = None,
     ):
         self.movies = movies.sort_values("movie_id").reset_index(drop=True)
         self.movie_ids = self.movies["movie_id"].to_numpy(dtype=str)
         self.movie_genres = [set(value.split("|")) for value in self.movies["genres"]]
         self.model = model
         genres = sorted(set().union(*self.movie_genres))
-        self.interpreter = PreferenceInterpreter(genres, cache_directory, env_file)
+        self.interpreter = PreferenceInterpreter(genres, cache_directory, env_file, storage_path=storage_path)
         self.title_index = {}
 
         for index, title in enumerate(self.movies["title"]):
@@ -61,22 +62,30 @@ class ColdStartRecommender:
         top_k: int = 10,
         seen_movie_ids: set[str] | None = None,
         offline: bool = False,
+        *,
+        context: dict | None = None,
     ) -> dict:
         if top_k < 1:
             raise ValueError("The number of recommendations must be positive")
 
         # Reuse the interpretation, but rank again with the current model and seen movies
-        profile, cached = self.interpreter.get_profile(likes, dislikes, offline)
+        saved, cached = self.interpreter.get_profile_record(likes, dislikes, offline, context=context)
+        profile = saved["profile"]
+        provenance = saved.get("_provenance") or {}
         seen = set() if seen_movie_ids is None else set(seen_movie_ids)
         recommendations = self._rank_movies(profile, seen, top_k)
 
         return {
             "recommendations": recommendations,
-            "llm_model": LLM_MODEL,
+            "llm_model": saved.get("model") or LLM_MODEL,
             "cached": cached,
-            "profile_version": "sha256:" + hashlib.sha256(
-                json.dumps(profile, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
+            "profile_version": content_version(profile),
+            "profile_id": provenance.get("profile_id"),
+            "llm_attempt_id": provenance.get("attempt_id"),
+            "llm_response_id": saved.get("response_id"),
+            "prompt_version": provenance.get("prompt_version"),
+            "schema_version": provenance.get("schema_version"),
+            "profile_origin": provenance.get("origin", "legacy_cache"),
         }
 
     @staticmethod

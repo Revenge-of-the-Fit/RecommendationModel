@@ -43,6 +43,7 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
             LOGGER.error("Request logging unavailable at startup (%s)", type(error).__name__)
         try:
             app.state.service = await asyncio.to_thread(RecommendationService.load, settings)
+            app.state.profile_import_error = getattr(app.state.service, "profile_import_error", None)
         except Exception as error:
             LOGGER.error("Serving resources could not be loaded (%s); readiness will return 503", type(error).__name__)
         try:
@@ -63,6 +64,8 @@ def create_app(settings: ServingSettings | None = None) -> FastAPI:
     app.state.request_log_capture_failed = 0
     app.state.request_log_unavailable = 0
     app.state.code_version = None
+    app.state.profile_import_error = None
+    app.state.settings = settings
     app.include_router(router)
     return app
 
