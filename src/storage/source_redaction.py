@@ -9,7 +9,7 @@ SENSITIVE_VALUE = re.compile(
     rb'''(?ix)
     (\b(?:[\w.-]*(?:authorization|password|passwd|secret|api[_.-]?key|credential(?:s)?|cookie(?:s)?|token|session[_.-]?(?:id|key)|private[_.-]?key)[\w.-]*|auth|session)
     ["']?\s*[:=]\s*)
-    ("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^,;&\r\n}\]]*)
+    ("(?:\\.|[^"\\\r\n])*(?:"|\\?$)|'(?:\\.|[^'\\\r\n])*(?:'|\\?$)|[^,;&\r\n}\]]*)
     '''
 )
 URL_CREDENTIALS = re.compile(rb"(?i)(https?://)[^\s/]+@")

@@ -273,6 +273,24 @@ class EventStorageTests(unittest.TestCase):
                     self.assertNotIn(b"credential-sentinel", combined)
                     self.assertNotIn(b"another-sentinel", combined)
 
+    def test_unfinished_quoted_credentials_are_redacted_through_end_of_payload(self):
+        payloads = [
+            b'{"password":"private,tailfragment',
+            b'{"password":"private,\\"tailfragment',
+            b'{"password":"private,tailfragment\\',
+            b"{'api_key':'private,tailfragment",
+        ]
+        with EventStore(self.path) as store:
+            for offset, payload in enumerate(payloads):
+                with self.subTest(payload=payload):
+                    envelope = event_envelope(offset=offset, value=payload)
+                    store.save_event(envelope, parse_event(payload))
+                    saved = self.get_saved(store, envelope)
+                    self.assertTrue(saved["raw_redacted"])
+                    self.assertIn(b"[redacted]", saved["raw_value"])
+                    self.assertNotIn(b"private", saved["raw_value"])
+                    self.assertNotIn(b"tailfragment", saved["raw_value"])
+
     def test_nonsecret_token_usage_survives_source_and_header_redaction(self):
         value = b'{"input_tokens":4,"output_tokens":5,"total_tokens":9}'
         envelope = event_envelope(value=value, headers=[("usage", value)])
