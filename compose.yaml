@@ -83,7 +83,9 @@ services:
       - --source-id
       - cmu-movielog
       - --group-id
-      - ${KAFKA_GROUP_ID:-team2-issue4}
+      - ${KAFKA_GROUP_ID:-team2-live-m1-v1}
+      - --offset-reset
+      - latest
       - --event-timezone
       - ${KAFKA_EVENT_TIMEZONE:-UTC}
       - --run-as-uid
