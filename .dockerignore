@@ -9,3 +9,10 @@ models
 .pytest_cache
 .idea
 .vscode
+tests
+tmp*/
+state
+archives
+*.sqlite*
+.config
+**/.config
