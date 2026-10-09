@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 
-DATABASE_SCHEMA_VERSION = 2
+DATABASE_SCHEMA_VERSION = 3
 DEFAULT_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "live" / "events.sqlite3"
 
 
@@ -30,6 +30,7 @@ def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
                     raise
                 time.sleep(min(0.01, remaining))
         connection.execute(f"PRAGMA busy_timeout={int(busy_timeout * 1000)}")
+        connection.execute("PRAGMA foreign_keys=ON")
         if mode != "wal":
             raise StorageError("Storage requires a file-backed WAL database")
         connection.execute("PRAGMA synchronous=FULL")
@@ -83,6 +84,35 @@ def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
                 connection.execute("""
                     CREATE INDEX events_by_user_time
                     ON kafka_events(user_id, event_timestamp, event_type)
+                """)
+            if version < 3:
+                connection.execute("""
+                    CREATE TABLE metadata_fetches (
+                        fetch_id TEXT PRIMARY KEY NOT NULL,
+                        source_id TEXT NOT NULL,
+                        entity_type TEXT NOT NULL CHECK(entity_type IN ('user', 'movie')),
+                        started_at TEXT NOT NULL,
+                        finished_at TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK(status IN ('success', 'partial', 'failed')),
+                        fingerprint TEXT NOT NULL,
+                        record_json TEXT NOT NULL
+                    )
+                """)
+                connection.execute("""
+                    CREATE TABLE metadata_snapshots (
+                        snapshot_id TEXT PRIMARY KEY NOT NULL,
+                        fetch_id TEXT NOT NULL REFERENCES metadata_fetches(fetch_id),
+                        source_id TEXT NOT NULL,
+                        entity_type TEXT NOT NULL CHECK(entity_type IN ('user', 'movie')),
+                        entity_id TEXT NOT NULL,
+                        fetched_at TEXT NOT NULL,
+                        content_version TEXT NOT NULL,
+                        record_json TEXT NOT NULL
+                    )
+                """)
+                connection.execute("""
+                    CREATE INDEX metadata_by_entity_time
+                    ON metadata_snapshots(source_id, entity_type, entity_id, fetched_at, snapshot_id)
                 """)
             connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
             connection.commit()

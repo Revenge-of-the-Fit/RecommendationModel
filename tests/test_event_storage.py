@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from events.parser import parse_event
-from storage.database import StorageError
+from storage.database import DATABASE_SCHEMA_VERSION, StorageError
 from storage.events import EventStore, KafkaEnvelope
 from storage.requests import RequestLog, RequestStore
 
@@ -104,7 +104,7 @@ class EventStorageTests(unittest.TestCase):
         with EventStore(self.path) as store:
             self.assertTrue(store.save_event(envelope, parse_event(envelope.value)))
         with closing(sqlite3.connect(self.path)) as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], DATABASE_SCHEMA_VERSION)
             saved_json = connection.execute(
                 "SELECT record_json FROM recommendation_requests WHERE request_id='existing'"
             ).fetchone()[0]
@@ -284,7 +284,7 @@ class EventStorageTests(unittest.TestCase):
         self.assertFalse(saved["raw_redacted"])
 
     def test_unsupported_database_versions_are_not_overwritten(self):
-        for version in (-1, 3):
+        for version in (-1, DATABASE_SCHEMA_VERSION + 1):
             with self.subTest(version=version):
                 path = self.path.with_name(f"version-{version}.sqlite3")
                 with closing(sqlite3.connect(path)) as connection:
