@@ -34,7 +34,8 @@ class ColdStartTests(unittest.TestCase):
             columns=["movie_id", "title", "genres", "overview"],
         )
         self.recommender = ColdStartRecommender(
-            self.movies, self.cache_directory, storage_path=self.cache_directory / "records.sqlite3",
+            self.movies, self.cache_directory, self.cache_directory / "unused.env",
+            storage_path=self.cache_directory / "records.sqlite3",
         )
         self.interpreter = self.recommender.interpreter
         self.profile = {
@@ -182,6 +183,7 @@ class ColdStartTests(unittest.TestCase):
 
         arguments = client.responses.create.call_args.kwargs
         self.assertEqual(arguments["model"], "gpt-6-luna")
+        self.assertEqual(arguments["reasoning"], {"effort": "none"})
         self.assertFalse(arguments["store"])
         self.assertTrue(arguments["text"]["format"]["strict"])
         self.assertLess(len(arguments["instructions"]), 2000)
@@ -193,6 +195,26 @@ class ColdStartTests(unittest.TestCase):
             with patch("preferences.dotenv_values", return_value={}):
                 with self.assertRaisesRegex(ColdStartError, "OPENAI_TOKEN"):
                     self.interpreter._request("preferences", {})
+
+    def test_partial_azure_configuration_does_not_fall_back_to_openai(self):
+        for name in ("AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT", "AZURE_OPENAI_API_KEY"):
+            with self.subTest(name=name), patch.dict("os.environ", {}, clear=True):
+                with patch("preferences.dotenv_values", return_value={name: "set", "OPENAI_TOKEN": "direct-key"}):
+                    with patch("preferences.OpenAI") as client:
+                        with self.assertRaisesRegex(ColdStartError, "AZURE_OPENAI"):
+                            self.interpreter._request("preferences", {})
+                        client.assert_not_called()
+
+    def test_azure_project_url_is_not_used_as_the_model_endpoint(self):
+        settings = {
+            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com/api/projects/proj-default",
+            "AZURE_OPENAI_DEPLOYMENT": "gpt-5-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
+        }
+        with patch.dict("os.environ", {}, clear=True), patch("preferences.dotenv_values", return_value=settings):
+            with patch("preferences.OpenAI") as client:
+                with self.assertRaisesRegex(ColdStartError, "resource endpoint"):
+                    self.interpreter._request("preferences", {})
+                client.assert_not_called()
 
     def test_api_errors_do_not_expose_the_key(self):
         class RequestFailure(Exception):

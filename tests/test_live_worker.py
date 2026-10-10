@@ -113,6 +113,20 @@ class LiveWorkerTests(unittest.TestCase):
         self.assertEqual(self.user(42)["attempts"], 0)
         self.assertEqual(json.loads(self.user(42)["record_json"])["likes"], "Comedy")
 
+    def test_provider_switch_preserves_completed_profile_refresh_deadline(self):
+        self.enqueue(42)
+        fetch = Mock(side_effect=self.batch())
+        self.worker().run_once(fetch)
+        before = self.user(42)
+        with patch.dict("os.environ", {
+            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com/openai/v1",
+            "AZURE_OPENAI_DEPLOYMENT": "gpt-5-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
+        }):
+            self.worker().run_once(fetch)
+        self.assertEqual(self.user(42), before)
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(self.interpreter.get_profile_record.call_count, 1)
+
     def test_changed_interpretation_schema_refreshes_profile_with_fresh_cached_metadata(self):
         self.enqueue(42)
         fetch = Mock(side_effect=self.batch())
