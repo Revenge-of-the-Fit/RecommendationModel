@@ -5,7 +5,6 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 from openai import APIError, OpenAI
@@ -21,8 +20,6 @@ PROJECT_DIRECTORY = Path(__file__).resolve().parents[1]
 CACHE_DIRECTORY = PROJECT_DIRECTORY / "models" / "cold_start"
 ENV_FILE = PROJECT_DIRECTORY / ".env"
 LLM_MODEL = "gpt-6-luna"
-# Keep existing paid profiles when changing the provider or deployment.
-PROFILE_CACHE_NAMESPACE = "gpt-6-luna"
 LOGGER = logging.getLogger(__name__)
 
 INSTRUCTIONS = """Extract movie preferences from the user's likes and dislikes.
@@ -56,7 +53,7 @@ def _without_credential(value, credential):
 
 
 class PreferenceInterpreter:
-    """Turn likes and dislikes into a cached preference profile."""
+    """Turn likes and dislikes into a cached GPT6 Luna preference profile."""
 
     def __init__(
         self,
@@ -89,13 +86,14 @@ class PreferenceInterpreter:
         schema = self._response_schema()
         # Refresh the profile when the prompt or response schema changes
         cache_input = json.dumps(
-            [PROFILE_CACHE_NAMESPACE, INSTRUCTIONS, user_input, schema], ensure_ascii=False
+            [LLM_MODEL, INSTRUCTIONS, user_input, schema], ensure_ascii=False
         )
         cache_key = hashlib.sha256(cache_input.encode("utf-8")).hexdigest()
         cache_path = self.cache_directory / f"{cache_key}.json"
         versions = {
             "prompt": "sha256:" + hashlib.sha256(INSTRUCTIONS.encode("utf-8")).hexdigest(),
             "schema": content_version(schema),
+            "requested_model": LLM_MODEL,
             "code": self.processing_version,
         }
         saved = None
@@ -174,18 +172,15 @@ class PreferenceInterpreter:
                     self._publish_record(store, cache_path, saved, context, cached=True)
                     return saved, True
 
-            configuration = self._llm_configuration()
-            versions["requested_model"] = configuration["model"]
             attempt = store.start_attempt({
                 "attempt_id": uuid.uuid4().hex, "cache_key": cache_key,
                 "started_at": utc_timestamp(), "user_id": context.get("user_id"),
                 "source_snapshot_id": context.get("source_snapshot_id"),
                 "context": context, "versions": versions,
                 "request": {
-                    "model": configuration["model"], "base_url": configuration["base_url"],
-                    "instructions": INSTRUCTIONS, "input": descriptions,
+                    "model": LLM_MODEL, "instructions": INSTRUCTIONS, "input": descriptions,
                     "input_text": user_input, "schema": schema,
-                    "reasoning": {"effort": configuration["reasoning_effort"]}, "max_output_tokens": 3000,
+                    "reasoning": {"effort": "none"}, "max_output_tokens": 3000,
                     "text": {"format": {"type": "json_schema", "name": "movie_preferences",
                                         "strict": True, "schema": schema}},
                     "store": False, "sdk_max_retries": 0,
@@ -199,9 +194,7 @@ class PreferenceInterpreter:
                 store.update_attempt(attempt)
 
             try:
-                saved = prepare_metadata_record(self._request(
-                    user_input, schema, on_response=received, configuration=configuration,
-                ))
+                saved = prepare_metadata_record(self._request(user_input, schema, on_response=received))
                 self._validate_profile(saved["profile"])
             except Exception as error:
                 details = prepare_metadata_record(getattr(error, "provenance", {}) or {})
@@ -226,7 +219,7 @@ class PreferenceInterpreter:
                 "created_at": created_at, "attempt_id": attempt["attempt_id"],
                 "origin": "llm", "profile": saved["profile"],
                 "content_version": content_version(saved["profile"]),
-                "model": saved.get("model", configuration["model"]), "response_id": saved.get("response_id"),
+                "model": saved.get("model", LLM_MODEL), "response_id": saved.get("response_id"),
                 "usage": saved.get("usage"), "versions": versions,
                 "provider_request_id": saved.get("provider_request_id"),
                 "provider_status": saved.get("provider_status"),
@@ -410,56 +403,29 @@ class PreferenceInterpreter:
             "additionalProperties": False,
         }
 
-    def _llm_configuration(self):
+    def _request(self, user_input: str, schema: dict, *, on_response=None) -> dict:
         settings = dotenv_values(self.env_file, encoding="utf-8-sig", interpolate=False)
-
-        def value(name):
-            return (os.environ.get(name) or settings.get(name) or "").strip()
-
-        endpoint = value("AZURE_OPENAI_ENDPOINT")
-        deployment = value("AZURE_OPENAI_DEPLOYMENT")
-        azure_key = value("AZURE_OPENAI_API_KEY")
-        if endpoint or deployment or azure_key:
-            if not endpoint or not deployment or not azure_key:
-                raise ColdStartError(
-                    "Set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY in .env."
-                )
-            url = urlsplit(endpoint)
-            if (url.scheme != "https" or not url.netloc or url.username or url.password
-                    or url.query or url.fragment or url.path.rstrip("/") not in ("", "/openai/v1")):
-                raise ColdStartError("AZURE_OPENAI_ENDPOINT must be the resource endpoint or its /openai/v1 URL.")
-            base_url = endpoint.rstrip("/")
-            if not url.path.rstrip("/"):
-                base_url += "/openai/v1"
-            return {
-                "model": deployment, "base_url": base_url + "/", "api_key": azure_key,
-                "reasoning_effort": "minimal",
-            }
-        return {
-            "model": LLM_MODEL, "base_url": "https://api.openai.com/v1",
-            "api_key": (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENAI_TOKEN")
-                        or settings.get("OPENAI_API_KEY") or settings.get("OPENAI_TOKEN")),
-            "reasoning_effort": "none",
-        }
-
-    def _request(self, user_input: str, schema: dict, *, on_response=None, configuration=None) -> dict:
-        configuration = configuration if configuration is not None else self._llm_configuration()
-        api_key = configuration["api_key"]
+        api_key = (
+            os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENAI_TOKEN")
+            or settings.get("OPENAI_API_KEY")
+            or settings.get("OPENAI_TOKEN")
+        )
         if not api_key:
-            raise ColdStartError("Set OPENAI_TOKEN or OPENAI_API_KEY in .env to use OpenAI.")
+            raise ColdStartError("Set OPENAI_TOKEN or OPENAI_API_KEY in .env to use GPT6 Luna.")
 
         try:
             with _quiet_http("openai"), OpenAI(
                 api_key=api_key,
-                base_url=configuration["base_url"],
+                base_url="https://api.openai.com/v1",
                 timeout=60.0,
                 max_retries=0,
             ) as client:
                 response = client.responses.create(
-                    model=configuration["model"],
+                    model=LLM_MODEL,
                     instructions=INSTRUCTIONS,
                     input=user_input,
-                    reasoning={"effort": configuration["reasoning_effort"]},
+                    reasoning={"effort": "none"},
                     text={
                         "format": {
                             "type": "json_schema",
@@ -497,15 +463,15 @@ class PreferenceInterpreter:
                     "body": getattr(error, "body", None),
                 }
             details = _without_credential(prepare_metadata_record(details), api_key)
-            raise ColdStartError(f"Preference model request failed ({detail}).", details) from None
+            raise ColdStartError(f"GPT6 Luna request failed ({detail}).", details) from None
 
         if response.status != "completed" or not response.output_text:
-            raise ColdStartError("The preference model did not return a completed preference profile.", saved)
+            raise ColdStartError("GPT6 Luna did not return a completed preference profile.", saved)
 
         try:
             profile = json.loads(saved["output_text"])
         except (ValueError, TypeError):
-            raise ColdStartError("The preference model returned an invalid preference profile.", saved) from None
+            raise ColdStartError("GPT6 Luna returned an invalid preference profile.", saved) from None
 
         return {**saved, "profile": profile}
 

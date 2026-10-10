@@ -111,17 +111,18 @@ class KafkaConsumerTests(unittest.TestCase):
             stats = run_consumer(consumer, store, "course-cluster", max_messages=1)
         self.assertEqual(stats, {
             "received": 1, "stored": 1, "duplicates": 0, "parsed": 1,
-            "unrecognized": 0, "failed": 0, "committed": 1,
+            "unrecognized": 0, "failed": 0, "committed": 1, "coalesced": 0,
         })
         offsets, asynchronous = consumer.commits[0]
         self.assertFalse(asynchronous)
         self.assertEqual((offsets[0].topic, offsets[0].partition, offsets[0].offset), ("movielog2", 2, 101))
         self.assertEqual(consumer.closed, 1)
-        self.assertEqual(consumer.subscriptions, [(["movielog2"], {})])
+        self.assertEqual(consumer.subscriptions[0][0], ["movielog2"])
+        self.assertEqual(set(consumer.subscriptions[0][1]), {"on_assign", "on_revoke", "on_lost"})
 
     def test_store_failure_never_commits_and_closes_consumer(self):
         consumer = FakeConsumer([FakeMessage()])
-        store = SimpleNamespace(save_event=Mock(side_effect=sqlite3.OperationalError("test disk failure")))
+        store = SimpleNamespace(save_events=Mock(side_effect=sqlite3.OperationalError("test disk failure")))
         with self.assertRaises(sqlite3.OperationalError):
             run_consumer(consumer, store, "course-cluster", max_messages=1)
         self.assertEqual(consumer.commits, [])
@@ -238,7 +239,7 @@ class KafkaConsumerTests(unittest.TestCase):
             with patch("events.consumer.time.monotonic", side_effect=(0, 2)):
                 stats = run_consumer(consumer, store, "course-cluster", idle_timeout=1)
         self.assertEqual(stats["received"], 0)
-        self.assertEqual(consumer.polls, [1.0])
+        self.assertEqual(consumer.polls, [0.5])
         self.assertEqual(consumer.closed, 1)
         stopped = threading.Event()
         stopped.set()
@@ -257,7 +258,7 @@ class KafkaConsumerTests(unittest.TestCase):
         with patch("events.consumer.time.monotonic", side_effect=(0, 2, 3)):
             stats = run_consumer(consumer, Mock(), "course-cluster", idle_timeout=1)
         self.assertEqual(stats["received"], 0)
-        self.assertEqual(consumer.polls, [1.0])
+        self.assertEqual(consumer.polls, [0.5])
         self.assertEqual(consumer.closed, 1)
 
     def test_invalid_bounds_and_configuration_close_before_subscription(self):
@@ -266,6 +267,8 @@ class KafkaConsumerTests(unittest.TestCase):
             {"max_messages": -1}, {"idle_timeout": 0},
             {"idle_timeout": float("inf")}, {"idle_timeout": float("nan")},
             {"event_timezone": "+24:00"},
+            {"batch_size": 0}, {"batch_interval": float("nan")},
+            {"watch_idle_seconds": 0}, {"max_watch_sessions": 0},
         )
         for arguments in cases:
             with self.subTest(arguments=arguments):

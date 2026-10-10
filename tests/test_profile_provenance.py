@@ -125,6 +125,7 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertEqual(saved["response_id"], response.id)
         self.assertEqual(saved["usage"], response.envelope["usage"])
         self.assertEqual(factory.call_args.kwargs["max_retries"], 0)
+        self.assertEqual(create.call_args.kwargs["reasoning"], {"effort": "none"})
         self.assertEqual(create.call_count, 1)
         self.assertEqual(json.loads(create.call_args.kwargs["input"]), {"likes": "Crime dramas", "dislikes": "Horror"})
         provenance = saved["_provenance"]
@@ -134,6 +135,7 @@ class ProfileProvenanceTests(unittest.TestCase):
             attempt = reopened.get_attempt(provenance["attempt_id"])
             profile = reopened.get_profile(provenance["profile_id"])
         self.assertEqual(attempt["status"], "success")
+        self.assertEqual(attempt["request"]["reasoning"], {"effort": "none"})
         self.assertEqual(attempt["response"], response.envelope)
         self.assertIn("Crime dramas", json.dumps(attempt))
         self.assertIn(INSTRUCTIONS.strip(), json.dumps(attempt).replace("\\n", "\n"))
@@ -141,46 +143,28 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertIn(self.profile, profile.values())
         self.assertNotIn("sdk-test-secret", json.dumps(attempt))
 
-    def test_azure_request_records_deployment_and_retains_actual_model(self):
-        response = self.response()
-        azure = {
-            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com",
-            "AZURE_OPENAI_DEPLOYMENT": "class-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
-        }
-        with self.sdk(response) as (factory, create, _):
-            with patch.dict("os.environ", azure):
-                saved, cached = self.interpreter.get_profile_record("Crime dramas", "Horror")
-        self.assertFalse(cached)
-        self.assertEqual(factory.call_args.kwargs["base_url"], azure["AZURE_OPENAI_ENDPOINT"] + "/openai/v1/")
-        self.assertEqual(factory.call_args.kwargs["api_key"], "azure-test-key")
-        self.assertEqual(create.call_args.kwargs["model"], "class-mini")
-        self.assertEqual(create.call_args.kwargs["reasoning"], {"effort": "minimal"})
-        self.assertTrue(create.call_args.kwargs["text"]["format"]["strict"])
-        self.assertFalse(create.call_args.kwargs["store"])
-        attempt = self.rows("llm_attempts")[0]
-        self.assertEqual(attempt["versions"]["requested_model"], "class-mini")
-        self.assertEqual(attempt["request"]["model"], "class-mini")
-        self.assertEqual(attempt["request"]["reasoning"], create.call_args.kwargs["reasoning"])
-        self.assertEqual(saved["model"], response.model)
-        self.assertNotIn("azure-test-key", json.dumps(attempt))
-
-    def test_provider_switch_reuses_cache_and_durable_profile_without_relabeling(self):
-        with self.sdk():
+    def test_existing_model_profile_survives_provider_removal_and_missing_cache(self):
+        with self.sdk(self.response(model="gpt-5-mini")):
             original, _ = self.interpreter.get_profile_record("Crime dramas", "Horror")
+        with closing(sqlite3.connect(self.database)) as connection, connection:
+            for table, identifier in (("llm_attempts", "attempt_id"), ("preference_profiles", "profile_id")):
+                record = self.rows(table)[0]
+                record["versions"]["requested_model"] = "gpt-5-mini"
+                if table == "llm_attempts":
+                    record["request"]["model"] = "gpt-5-mini"
+                connection.execute(
+                    f"UPDATE {table} SET record_json=? WHERE {identifier}=?",
+                    (json.dumps(record), record[identifier]),
+                )
         before = {table: self.rows(table) for table in ("llm_attempts", "preference_profiles")}
-        azure = {
-            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com/openai/v1",
-            "AZURE_OPENAI_DEPLOYMENT": "gpt-5-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
-        }
         path = self.cache / (original["_provenance"]["cache_key"] + ".json")
         for remove_cache in (False, True):
             with self.subTest(remove_cache=remove_cache):
                 if remove_cache:
                     path.unlink()
-                with patch.dict("os.environ", azure, clear=True):
-                    with patch("preferences.dotenv_values", side_effect=AssertionError("Reuse read credentials")):
-                        with patch("preferences.OpenAI", side_effect=AssertionError("Reuse called provider")):
-                            reused, cached = self.new_interpreter().get_profile_record("Crime dramas", "Horror")
+                with patch("preferences.dotenv_values", side_effect=AssertionError("Reuse read credentials")):
+                    with patch("preferences.OpenAI", side_effect=AssertionError("Reuse called provider")):
+                        reused, cached = self.new_interpreter().get_profile_record("Crime dramas", "Horror")
                 self.assertTrue(cached)
                 self.assertEqual(reused, original)
                 self.assertEqual(before, {table: self.rows(table) for table in before})

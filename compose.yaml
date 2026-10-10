@@ -41,9 +41,6 @@ services:
       LIVE_ENABLED: "1"
       METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${OPENAI_TOKEN:-}}
-      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
-      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
-      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
     ports:
       - "8082:8082"
     volumes:
@@ -91,6 +88,14 @@ services:
       - latest
       - --event-timezone
       - ${KAFKA_EVENT_TIMEZONE:-UTC}
+      - --batch-size
+      - ${KAFKA_BATCH_SIZE:-500}
+      - --batch-interval
+      - ${KAFKA_BATCH_INTERVAL:-0.5}
+      - --watch-idle-seconds
+      - ${KAFKA_WATCH_IDLE_SECONDS:-300}
+      - --max-watch-sessions
+      - ${KAFKA_MAX_WATCH_SESSIONS:-50000}
       - --run-as-uid
       - "10001"
       - --run-as-gid
@@ -149,9 +154,6 @@ services:
     environment:
       <<: *storage-environment
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
-      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
-      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       APP_REVISION: ${APP_REVISION:-unknown}
     volumes:
       - catalog:/app/data:ro
