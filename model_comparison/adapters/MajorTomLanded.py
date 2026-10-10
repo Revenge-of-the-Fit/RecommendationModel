@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from model_comparison.costs import CostRecorder
 from model_comparison.job import Job, JobResult
 
 NAME = "MajorTomLanded"
@@ -29,19 +30,26 @@ def recommend(job: Job) -> JobResult:
     client.movielens_ratings = pd.read_csv(client.DATA_DIR / "ml-latest-small" / "ratings.csv")
     client.users = job.users
     client.ratings = job.events[job.events["event_type"] == "rating"][["user_id", "movie_id", "rating"]]
-    client.ratings_matrix = client.make_combined_ratings_matrix()
 
     class TunedRecommender(Recommender):
         def predict_rating(self, user_id, movie_id, neighborhood_size=None):
             return super().predict_rating(user_id, movie_id, job.params["neighborhood_size"])
 
-    model = TunedRecommender(client)
+    def build():
+        # What a service would do at startup: build the combined ratings matrix and the recommender
+        client.ratings_matrix = client.make_combined_ratings_matrix()
+        return TunedRecommender(client)
+
+    costs = CostRecorder()
+    model = costs.fit(build)
+    costs.measure_size(vars(model))  # our tuning subclass is local and unpicklable; its state is the model
     recommendations, failed = {}, {}
     for user_id in job.user_ids:
         user_id = int(user_id)
         try:
-            recommendations[user_id] = [str(m) for m in model.recommend(f"course_{user_id}", n=job.k).index]
+            ranked = costs.request(model.recommend, f"course_{user_id}", n=job.k)
+            recommendations[user_id] = [str(m) for m in ranked.index]
         except KeyError:
             recommendations[user_id] = []
             failed[user_id] = "no ratings in training data"
-    return JobResult(recommendations, failed)
+    return JobResult(recommendations, failed, {"costs": costs.summary()})

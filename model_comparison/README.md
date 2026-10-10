@@ -26,6 +26,31 @@ Run a subset with `--models popularity Helixan`.
 The d-urbonas model needs OpenAI credit. If the account has none, the run stops with a clear
 message (completed users stay cached, so a rerun resumes).
 
+## Costs (training, inference, size)
+Every full run also reports cost, measured on the final fit (train+validation) of each model:
+
+| Quality | Metric | How |
+|---|---|---|
+| Training cost | fit seconds; memory growth during fit; peak process memory | wall clock around the model's fit/train call, in the adapter's own process; RSS before/after via psutil; peak from `getrusage` |
+| Inference cost | p50 / p95 / max latency of one single-user top-10 request; requests per second | each user's request timed alone on the fitted model (requests/s = 1 / mean latency) |
+| Size | serialized bytes of the trained model | `len(pickle.dumps(model))` (d-urbonas: size of its embeddings file) |
+
+To measure cost only (no tuning, no scoring), for example on the course VM:
+```bash
+.venv/bin/python -m model_comparison.compare --only-costs --cost-users 200 --cost-repeats 3
+```
+This writes `results/costs.md` and `results/costs.json` and leaves `comparison.*` untouched. It reuses each
+model's hyperparameters from an earlier `results/comparison.json` when there is one, otherwise the middle of
+its grid, and lists them in the report. `--cost-repeats N` refits local models N times and reports the median
+fit time (d-urbonas is never repeated: it would repeat paid API calls).
+
+Things to know when quoting the numbers:
+- They describe the machine printed above the table; the deployed VM will differ.
+- d-urbonas has no fit when its precomputed embeddings are reused ("n/a"); its latency is the real
+  LLM + embedding request time, stored in its cache so reruns still report it.
+- Model size for MajorTomLanded includes the MovieLens data its model loads, as submitted.
+- Latency is per request on a warm model; it excludes model loading and any HTTP layer.
+
 ## Tests
 ```bash
 .venv/bin/python -m pytest

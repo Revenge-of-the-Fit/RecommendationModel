@@ -2,6 +2,7 @@
 import sys
 from pathlib import Path
 
+from model_comparison.costs import CostRecorder
 from model_comparison.job import Job, JobResult
 
 NAME = "MuhammadDF"
@@ -20,9 +21,13 @@ def recommend(job: Job) -> JobResult:
     # Only events for training pairs, so held-out interactions never reach the model
     job.events.to_csv(data_dir / "events.csv", index=False)
 
-    trained = MuhammadDF_model.train_model(data_dir, n_neighbors=job.params["n_neighbors"])
+    costs = CostRecorder()
+    trained = costs.fit(MuhammadDF_model.train_model, data_dir, n_neighbors=job.params["n_neighbors"])
+    costs.measure_size(trained)
     recommendations = {
-        int(user_id): [m["movie_id"] for m in MuhammadDF_model.recommend(trained, int(user_id), top_k=job.k)]
+        int(user_id): [
+            m["movie_id"] for m in costs.request(MuhammadDF_model.recommend, trained, int(user_id), top_k=job.k)
+        ]
         for user_id in job.user_ids
     }
-    return JobResult(recommendations)
+    return JobResult(recommendations, notes={"costs": costs.summary()})

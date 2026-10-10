@@ -2,6 +2,7 @@
 import sys
 from pathlib import Path
 
+from model_comparison.costs import CostRecorder
 from model_comparison.job import Job, JobResult
 
 NAME = "Helixan"
@@ -18,10 +19,12 @@ def recommend(job: Job) -> JobResult:
     sys.path.insert(0, str(Path(job.repo_dir) / "src"))
     from recommender import EaseRecommender  # Helixan's module
 
+    costs = CostRecorder()
     model = EaseRecommender(job.params["regularization"], job.params["min_rating"])
-    model.fit(job.interactions, job.movies)
+    costs.fit(model.fit, job.interactions, job.movies)
+    costs.measure_size(model)
     recommendations = {
-        int(user_id): model.recommend(int(user_id), job.k)["movie_id"].tolist()
+        int(user_id): costs.request(model.recommend, int(user_id), job.k)["movie_id"].tolist()
         for user_id in job.user_ids
     }
-    return JobResult(recommendations)
+    return JobResult(recommendations, notes={"costs": costs.summary()})

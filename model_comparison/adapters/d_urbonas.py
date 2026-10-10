@@ -7,11 +7,13 @@ import json
 import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pandas as pd
 
 from model_comparison.backoff import with_backoff
+from model_comparison.costs import CostRecorder
 from model_comparison.job import Job, JobResult
 
 NAME = "d-urbonas"
@@ -75,7 +77,9 @@ class JsonCache:
         (self.directory / f"{user_id}.json").write_text(json.dumps(value), encoding="utf-8")
 
 
-def run_with_module(job: Job, module, retriable: tuple, is_fatal=lambda error: False) -> JobResult:
+def run_with_module(job: Job, module, retriable: tuple, is_fatal=lambda error: False,
+                    costs: CostRecorder | None = None) -> JobResult:
+    costs = costs or CostRecorder()
     cache = JsonCache(Path(job.cache_dir) / "d-urbonas")
     index, ambiguous = build_title_index(job.movies)
     training_counts = job.interactions.groupby("user_id").size().to_dict()
@@ -87,6 +91,7 @@ def run_with_module(job: Job, module, retriable: tuple, is_fatal=lambda error: F
         needed = job.k + int(training_counts.get(user_id, 0))
         cached = cache.get(user_id)
         if cached is None or len(cached["movies"]) < needed:
+            started = time.perf_counter()
             try:
                 profile, movies = module.recommend_movies(str(user_id), top_k=needed)
             except Exception as error:  # recorded per user, never silently dropped
@@ -102,15 +107,20 @@ def run_with_module(job: Job, module, retriable: tuple, is_fatal=lambda error: F
             cached = {
                 "profile": profile.model_dump(),
                 "movies": [{"title": m["title"], "year": m["year"]} for m in movies],
+                # The real request time (LLM + embeddings), kept so cached reruns still report it
+                "latency_s": time.perf_counter() - started,
             }
             cache.put(user_id, cached)
+        if "latency_s" in cached:
+            costs.add_request_latency(cached["latency_s"])
         ids, unmapped = map_titles(cached["movies"], index)
         unmapped_total += unmapped
         recommendations[user_id] = ids
 
     return JobResult(
         recommendations, failed,
-        {"unmapped_titles": unmapped_total, "ambiguous_title_years_in_catalog": ambiguous},
+        {"unmapped_titles": unmapped_total, "ambiguous_title_years_in_catalog": ambiguous,
+         "costs": costs.summary()},
     )
 
 
@@ -150,9 +160,13 @@ def recommend(job: Job) -> JobResult:
         d_urbonas_model._get_preferences, retriable, give_up=is_quota_exhausted
     )
 
+    costs = CostRecorder()
     if _embeddings_match(repo_dir, movies_sorted):
+        # Precomputed catalog embeddings are reused, so there is no fit to time
         shutil.copy(repo_dir / "movie_embeddings.npy", work / "movie_embeddings.npy")
     else:
-        d_urbonas_model.train_model()  # one-time catalog embedding (~catalog size / 128 requests)
+        costs.fit(d_urbonas_model.train_model)  # one-time catalog embedding (~catalog size / 128 requests)
+    # Its "model" is the catalog embedding matrix that every request loads
+    costs.set_size_bytes((work / "movie_embeddings.npy").stat().st_size, "size of movie_embeddings.npy")
 
-    return run_with_module(job, d_urbonas_model, retriable, is_fatal=is_quota_exhausted)
+    return run_with_module(job, d_urbonas_model, retriable, is_fatal=is_quota_exhausted, costs=costs)

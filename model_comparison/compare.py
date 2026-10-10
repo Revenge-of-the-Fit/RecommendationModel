@@ -1,5 +1,6 @@
 """Run every selected model through the same split and write one comparison."""
 import argparse
+import json
 import os
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from model_comparison.adapters import get_adapter
+from model_comparison.costs import machine_info, median_fit_seconds
 from model_comparison.data import (
     Tables, build_interactions, events_for_pairs, fetch_course_data, file_sha256,
     load_tables, seen_by_user,
@@ -66,6 +68,31 @@ def select_params(adapter, make_job, train, validation, tuning_users, evaluator,
     return grid[best], rows
 
 
+def params_for_costs(adapter, previous: dict | None) -> dict:
+    """Costs depend on the hyperparameters: reuse the ones a comparison selected, else the middle of the grid."""
+    if previous is not None and previous in adapter.PARAM_GRID:
+        return previous
+    return adapter.PARAM_GRID[len(adapter.PARAM_GRID) // 2]
+
+
+def previous_params(results_dir: Path) -> dict:
+    path = Path(results_dir) / "comparison.json"
+    if not path.exists():
+        return {}
+    models = json.loads(path.read_text(encoding="utf-8")).get("models", {})
+    return {name: result.get("selected_params") for name, result in models.items()}
+
+
+def collect_costs(first_result, extra_results) -> dict:
+    """Costs of the final job; with repeats, fit time is the median and every run is kept."""
+    costs = dict(first_result.notes.get("costs", {}))
+    if extra_results:
+        runs = [costs, *[r.notes.get("costs", {}) for r in extra_results]]
+        costs["fit_seconds_runs"] = [run.get("fit_seconds") for run in runs]
+        costs["fit_seconds"] = median_fit_seconds(runs)
+    return costs
+
+
 def run_comparison(args, runner=run_job) -> dict:
     tables = load_tables(args.data_dir)
     interactions = build_interactions(tables.events)
@@ -97,24 +124,40 @@ def run_comparison(args, runner=run_job) -> dict:
             )
         return build
 
+    only_costs = getattr(args, "only_costs", False)
+    cost_users = sample_users(test_users, getattr(args, "cost_users", 200), args.seed)
+    repeats = max(1, getattr(args, "cost_repeats", 1))
+    earlier = previous_params(args.results_dir) if only_costs else {}
+
     models = {}
     for name in args.models:
         adapter, build = get_adapter(name), make_job(name)
         print(f"== {name}", flush=True)
-        params, tuning_rows = select_params(
-            adapter, build, train, validation, tuning_users, evaluator, catalog_ids, runner
-        )
-        users = test_users if adapter.FULL_POPULATION else shared_sample
+        if only_costs:
+            params, tuning_rows = params_for_costs(adapter, earlier.get(name)), []
+            users = cost_users if adapter.FULL_POPULATION else shared_sample
+        else:
+            params, tuning_rows = select_params(
+                adapter, build, train, validation, tuning_users, evaluator, catalog_ids, runner
+            )
+            users = test_users if adapter.FULL_POPULATION else shared_sample
         result = runner(build(params, trainval, users))
-        seen = seen_by_user(trainval)
-        shared_metrics, drops = _score(result, seen, test, evaluator, catalog_ids, shared_sample)
-        full_metrics = None
-        if adapter.FULL_POPULATION:
-            full_metrics, drops = _score(result, seen, test, evaluator, catalog_ids, test_users)
+        # Repeating a paid-API model would repeat its paid calls, so only local models are repeated
+        extra = [runner(build(params, trainval, users)) for _ in range(repeats - 1)] if adapter.FULL_POPULATION else []
+        costs = collect_costs(result, extra)
+
+        shared_metrics = full_metrics = None
+        drops = {"unknown_ids_dropped": 0, "seen_dropped": 0}
+        if not only_costs:
+            seen = seen_by_user(trainval)
+            shared_metrics, drops = _score(result, seen, test, evaluator, catalog_ids, shared_sample)
+            if adapter.FULL_POPULATION:
+                full_metrics, drops = _score(result, seen, test, evaluator, catalog_ids, test_users)
         models[name] = {
             "selected_params": params, "tuning": tuning_rows,
             "full_population": full_metrics, "shared_sample": shared_metrics,
-            "drops": drops, "failed_users": result.failed_users, "notes": result.notes,
+            "drops": drops, "failed_users": result.failed_users,
+            "notes": {k: v for k, v in result.notes.items() if k != "costs"}, "costs": costs,
         }
 
     payload = {
@@ -122,7 +165,9 @@ def run_comparison(args, runner=run_job) -> dict:
             "seed": args.seed, "top_k": args.top_k, "relevance_rating": args.relevance_rating,
             "validation_fraction": args.validation_fraction, "test_fraction": args.test_fraction,
             "tuning_users": len(tuning_users), "d_urbonas_sample": args.d_urbonas_sample,
+            "only_costs": only_costs, "cost_users": len(cost_users), "cost_repeats": repeats,
         },
+        "machine": machine_info(),
         "split": {
             "training": len(train), "validation": len(validation), "test": len(test),
             "test_users_evaluable": len(test_users), "sample_users": len(shared_sample),
@@ -131,7 +176,8 @@ def run_comparison(args, runner=run_job) -> dict:
         "data_sha256": file_sha256(args.data_dir),
         "models": models,
     }
-    write_report(Path(args.results_dir), payload)
+    # A costs-only run must not overwrite the accuracy results (or the params it reads from them)
+    write_report(Path(args.results_dir), payload, stem="costs" if only_costs else "comparison")
     return payload
 
 
@@ -148,6 +194,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument("--tuning-users", type=int, default=200)
     parser.add_argument("--d-urbonas-sample", type=int, default=50)
+    parser.add_argument("--only-costs", action="store_true",
+                        help="skip tuning and scoring; measure training cost, latency and size only "
+                             "(writes costs.md/json; reuses params from an earlier comparison.json)")
+    parser.add_argument("--cost-users", type=int, default=200,
+                        help="users whose single requests are timed with --only-costs")
+    parser.add_argument("--cost-repeats", type=int, default=1,
+                        help="runs per local model; fit time is the median")
     parser.add_argument("--models", nargs="+", default=["popularity", "Helixan", "MajorTomLanded", "MuhammadDF", "d-urbonas"],
                         choices=["popularity", "Helixan", "MajorTomLanded", "MuhammadDF", "d-urbonas"])
     return parser
@@ -159,9 +212,12 @@ def main(argv=None) -> None:
     check_prerequisites(args.models, args.external_dir, os.environ)
     fetch_course_data(args.data_dir)
     payload = run_comparison(args)
-    print(f"Wrote {args.results_dir / 'comparison.md'}")
+    print(f"Wrote {args.results_dir / ('costs.md' if args.only_costs else 'comparison.md')}")
     for name, result in payload["models"].items():
-        print(f"{name}: NDCG@{args.top_k}={result['shared_sample']['ndcg_at_k']:.4f} (shared sample)")
+        if result["shared_sample"] is None:
+            print(f"{name}: fit {result['costs']['fit_seconds']}s, p95 {result['costs']['latency_p95_ms']} ms")
+        else:
+            print(f"{name}: NDCG@{args.top_k}={result['shared_sample']['ndcg_at_k']:.4f} (shared sample)")
 
 
 if __name__ == "__main__":
