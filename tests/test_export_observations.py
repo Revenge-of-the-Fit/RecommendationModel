@@ -57,7 +57,7 @@ class ObservationExportTests(unittest.TestCase):
         self.assertEqual(counts, {"impressions": 2, "observed_events": 2, "candidate_links": 4, "ambiguous_events": 2})
         events = [row for row in rows if row["record_type"] == "observed_event"]
         self.assertTrue(all(row["ambiguous"] and row["candidate_count"] == 2 and row["attribution"] == "candidate_only" for row in events))
-        self.assertEqual(events[0]["observation_unit"], "movie_minute")
+        self.assertEqual(events[0]["observation_unit"], "latest_requested_minute")
         self.assertEqual(events[0]["observed_minute"], 17)
         self.assertNotIn("plays", events[0])
         self.assertEqual(events[1]["rating"], 9)

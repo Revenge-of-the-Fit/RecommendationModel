@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from storage.database import StorageError, open_database
+from storage.database import WATCH_EVENTS, StorageError, open_database, watch_order
+from storage.live import project_event
 from storage.source_redaction import redact_bytes, redact_headers, redact_source_fields
 
 
@@ -63,6 +64,30 @@ class EventStore:
             parsed["parser_version"], parsed_json,
         )
         with self.connection:
+            self.connection.execute("BEGIN IMMEDIATE")
+            existing = self.connection.execute("""
+                SELECT source_fingerprint FROM kafka_events
+                WHERE source_id=? AND topic=? AND partition=? AND offset=?
+            """, (envelope.source_id, envelope.topic, envelope.partition, envelope.offset)).fetchone()
+            if existing is not None:
+                if existing[0] != fingerprint:
+                    raise StorageError("Kafka offset already contains a different source record")
+                return False
+            if (parsed.get("event_type") == "watch" and parsed["parse_status"] == "parsed"
+                    and parsed.get("user_id") is not None and parsed.get("movie_id") is not None):
+                identity = (envelope.source_id, envelope.topic, parsed["user_id"], parsed["movie_id"])
+                previous = self.connection.execute(f"""
+                    SELECT event_timestamp, broker_timestamp_ms, partition, offset FROM kafka_events INDEXED BY watch_by_user_movie
+                    WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
+                """, identity).fetchall()
+                order = watch_order(parsed.get("event_timestamp"), envelope.broker_timestamp_ms,
+                                    envelope.partition, envelope.offset)
+                if previous and order <= max(watch_order(*row) for row in previous):
+                    return False
+                self.connection.execute(f"""
+                    DELETE FROM kafka_events INDEXED BY watch_by_user_movie
+                    WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
+                """, identity)
             cursor = self.connection.execute("""
                 INSERT INTO kafka_events (
                     source_id, topic, partition, offset, source_fingerprint, raw_key, raw_value,
@@ -72,14 +97,15 @@ class EventStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source_id, topic, partition, offset) DO NOTHING
             """, parameters)
-            if cursor.rowcount == 0:
-                existing = self.connection.execute("""
-                    SELECT source_fingerprint FROM kafka_events
-                    WHERE source_id=? AND topic=? AND partition=? AND offset=?
-                """, (envelope.source_id, envelope.topic, envelope.partition, envelope.offset)).fetchone()[0]
-                if existing != fingerprint:
-                    raise StorageError("Kafka offset already contains a different source record")
-        return cursor.rowcount == 1
+            inserted = cursor.rowcount == 1
+            if inserted:
+                self.connection.execute("""
+                    INSERT INTO live_event_cursors(source_id, topic, partition) VALUES (?, ?, ?)
+                    ON CONFLICT DO NOTHING
+                """, (envelope.source_id, envelope.topic, envelope.partition))
+                project_event(self.connection, envelope.source_id, envelope.topic, envelope.partition,
+                              envelope.offset, parsed, envelope.broker_timestamp_ms, envelope.ingested_at)
+        return inserted
 
     def get_event(self, source_id: str, topic: str, partition: int, offset: int) -> dict | None:
         cursor = self.connection.execute("""

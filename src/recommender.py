@@ -126,11 +126,39 @@ class EaseRecommender:
             raise ValueError("The number of recommendations must be positive")
 
         scores = self.get_scores(user_id, popularity_only)
-        eligible = self.popularity > 0
         user_row = self.user_index.get(user_id)
+        seen_columns = np.flatnonzero(self.seen_movies[user_row]) if user_row is not None else []
+        return self._recommend_scores(scores, seen_columns, top_k)
 
-        if user_row is not None:
-            eligible &= ~self.seen_movies[user_row]
+    def recommend_from_profile(
+        self,
+        positive_movie_ids,
+        seen_movie_ids,
+        top_k: int = 20,
+        popularity_only: bool = False,
+    ) -> pd.DataFrame:
+        if self.weights is None:
+            raise ValueError("Train or load a model before requesting recommendations")
+        if top_k <= 0:
+            raise ValueError("The number of recommendations must be positive")
+
+        positive_columns = sorted({
+            self.movie_index[movie_id]
+            for movie_id in positive_movie_ids
+            if movie_id in self.movie_index and self.popularity[self.movie_index[movie_id]] > 0
+        })
+        scores = self.popularity.copy() if popularity_only or not positive_columns else (
+            self.weights[positive_columns].sum(axis=0, dtype=np.float64)
+        )
+        seen_columns = [
+            self.movie_index[movie_id] for movie_id in set(seen_movie_ids)
+            if movie_id in self.movie_index
+        ]
+        return self._recommend_scores(scores, seen_columns, top_k)
+
+    def _recommend_scores(self, scores, seen_columns, top_k):
+        eligible = self.popularity > 0
+        eligible[seen_columns] = False
 
         candidates = np.flatnonzero(eligible)
         order = np.lexsort(

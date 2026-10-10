@@ -168,7 +168,7 @@ class EventStorageTests(unittest.TestCase):
                     self.assertEqual(self.get_saved(store, envelope), original)
 
     def test_source_namespace_topic_partition_and_offset_are_independent(self):
-        envelope = event_envelope()
+        envelope = event_envelope(value=b"2026-10-08T12:00:00+00:00,42,GET /rate/movie_a=9")
         records = (
             envelope,
             replace(envelope, source_id="other-cluster"),
@@ -318,7 +318,9 @@ class EventStorageTests(unittest.TestCase):
         def initialize(index):
             barrier.wait(timeout=5)
             if index % 2:
-                envelope = event_envelope(offset=index)
+                envelope = event_envelope(
+                    offset=index, value=b"2026-10-08T12:00:00+00:00,42,GET /rate/movie_a=9",
+                )
                 with EventStore(self.path, busy_timeout=5) as store:
                     return store.save_event(envelope, parse_event(envelope.value))
             with RequestStore(self.path, busy_timeout=5) as store:
@@ -344,7 +346,10 @@ class EventStorageTests(unittest.TestCase):
                 with EventStore(self.path, busy_timeout=3) as store:
                     barrier.wait(timeout=3)
                     for offset in range(20):
-                        envelope = event_envelope(partition=partition, offset=offset)
+                        envelope = event_envelope(
+                            partition=partition, offset=offset,
+                            value=b"2026-10-08T12:00:00+00:00,42,GET /rate/movie_a=9",
+                        )
                         store.save_event(envelope, parse_event(envelope.value))
             except Exception as error:
                 errors.append(error)

@@ -1,7 +1,7 @@
 x-storage-environment: &storage-environment
   STORAGE_PATH: /app/state/events/events.sqlite3
   STORAGE_BUSY_TIMEOUT: ${STORAGE_BUSY_TIMEOUT:-1}
-  STORAGE_MAX_BYTES: ${STORAGE_MAX_BYTES:-17179869184}
+  STORAGE_MAX_BYTES: ${STORAGE_MAX_BYTES:-103079215104}
   STORAGE_MIN_FREE_BYTES: ${STORAGE_MIN_FREE_BYTES:-1073741824}
 
 x-bounded-logging: &bounded-logging
@@ -38,6 +38,9 @@ services:
       DATA_DIRECTORY: /app/data
       MODEL_PATH: /app/models/recommender.npz
       CACHE_DIRECTORY: /app/state/cache
+      LIVE_ENABLED: "1"
+      METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-${OPENAI_TOKEN:-}}
     ports:
       - "8082:8082"
     volumes:
@@ -62,7 +65,6 @@ services:
 
   kafka:
     build: .
-    profiles: ["kafka"]
     # Private configuration is read first; the consumer then switches to UID/GID 10001.
     user: "0:10001"
     # The course broker advertises the host's SSH tunnel on localhost:9092.
@@ -81,7 +83,9 @@ services:
       - --source-id
       - cmu-movielog
       - --group-id
-      - ${KAFKA_GROUP_ID:-team2-issue4}
+      - ${KAFKA_GROUP_ID:-team2-live-m1-v1}
+      - --offset-reset
+      - latest
       - --event-timezone
       - ${KAFKA_EVENT_TIMEZONE:-UTC}
       - --run-as-uid
@@ -112,7 +116,7 @@ services:
       STORAGE_BACKUP_INTERVAL_HOURS: ${STORAGE_BACKUP_INTERVAL_HOURS:-24}
       STORAGE_BACKUP_RETAIN: ${STORAGE_BACKUP_RETAIN:-7}
       STORAGE_MIN_FREE_BYTES: ${STORAGE_MIN_FREE_BYTES:-1073741824}
-      STORAGE_MAX_DATABASE_BYTES: ${STORAGE_MAX_DATABASE_BYTES:-17179869184}
+      STORAGE_MAX_DATABASE_BYTES: ${STORAGE_MAX_DATABASE_BYTES:-103079215104}
       STORAGE_MAX_ARCHIVE_BYTES: ${STORAGE_MAX_ARCHIVE_BYTES:-34359738368}
     volumes:
       - event_logs:/app/state/events

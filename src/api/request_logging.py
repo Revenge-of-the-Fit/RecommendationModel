@@ -189,7 +189,7 @@ class RequestLoggingMiddleware:
                         "profile_id": result.profile_id, "attempt_id": result.llm_attempt_id,
                         "response_id": result.llm_response_id, "origin": result.profile_origin,
                         "prompt_version": result.prompt_version, "schema_version": result.schema_version,
-                    } if successful and result.method == "llm_cold_start" else None,
+                    } if successful and (result.method == "llm_cold_start" or result.profile_id is not None) else None,
                     "status": status,
                     "error_type": error_type or state.get("error_type") or (
                         "RequestValidationError" if status == 422 else

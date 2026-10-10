@@ -16,7 +16,7 @@ from storage.requests import RequestStore
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Run a local recovery/export example using synthetic impressions and watch/rating observations.",
-        epilog="Example: python scripts/recovery_example.py --directory data/recovery-example. The directory must be new. The workflow creates synthetic records, verifies a SQLite gzip backup with its matching manifest, restores into a new recovered.sqlite3, and replays the same Kafka source/topic/partition/offset keys with zero inserted rows. It then exports raw-records.jsonl and observations.jsonl. Keep the archive and manifest together for restoration; retention rotates archived backups only. This creates no Kafka connection. Two impressions contain the same movie, so every later observation has two candidate matches. Even one match would not prove attribution without a shared request ID. Two movie-minute requests remain two viewing observations, never two movie plays.",
+        epilog="Example: python scripts/recovery_example.py --directory data/recovery-example. The directory must be new. The workflow creates synthetic records, verifies a SQLite gzip backup with its matching manifest, restores into a new recovered.sqlite3, and replays the same Kafka source/topic/partition/offset keys with zero inserted rows. It then exports raw-records.jsonl and observations.jsonl. Keep the archive and manifest together for restoration; retention rotates archived backups only. This creates no Kafka connection. Two impressions contain the same movie, so every later observation has two candidate matches. Even one match would not prove attribution without a shared request ID. Two movie-minute requests become one latest watch position, never a count of movie plays.",
     )
     parser.add_argument("--directory", type=Path, required=True)
     arguments = parser.parse_args(argv)
@@ -62,7 +62,7 @@ def main(argv=None):
         print(json.dumps({
             "status": "passed", "replay_added_rows": 0, "exported_rows": exported,
             **matched, "matching": "candidate_only", "shared_request_id": False,
-            "watch_observation_unit": "movie_minute", "watch_observations": 2,
+            "watch_observation_unit": "latest_requested_minute", "watch_observations": 1,
             "raw_export": str(raw_path), "observation_export": str(matched_path),
         }, sort_keys=True))
         return 0

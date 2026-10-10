@@ -11,8 +11,8 @@ from storage.operations import export_observations
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Stream recommendation impressions, movie-minute observations, ratings, and possible later matches as JSONL.",
-        epilog="Matches are candidates based only on the same user/movie and a later timestamp within the window. Multiple impressions remain ambiguous; even one candidate does not prove attribution. Movie-minute observations are never play counts. Start is inclusive and end exclusive for impressions and observed events. As-of filters ingestion/availability to prevent later data leaking into an earlier view. Source/topic filters select Kafka data; local API impressions remain available as candidates. Raw unknown or malformed records remain recoverable through manage_storage export.",
+        description="Stream recommendation impressions, latest watch positions, ratings, and possible later matches as JSONL.",
+        epilog="Matches are candidates based only on the same user/movie and a later timestamp within the window. Multiple impressions remain ambiguous; even one candidate does not prove attribution. Watch positions are never play counts or proof that all earlier minutes were watched. Only the latest watch per user/movie is retained; earlier watch history cannot be reconstructed. Start is inclusive and end exclusive for impressions and observed events. As-of filters ingestion/availability to prevent later data leaking into an earlier view. Source/topic filters select Kafka data; local API impressions remain available as candidates. Raw unknown or malformed records remain recoverable through manage_storage export.",
     )
     parser.add_argument("--storage-path", type=Path, default=os.environ.get("STORAGE_PATH", DEFAULT_STORAGE_PATH))
     parser.add_argument("--output", type=Path, help="New JSONL path; omit to stream to stdout")
