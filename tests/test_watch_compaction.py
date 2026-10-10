@@ -157,6 +157,21 @@ class WatchCompactionTests(unittest.TestCase):
             self.assertEqual(store.list_events(42), [original])
             self.assertIsNone(self.get(store, replacement))
 
+    def test_watch_pair_queries_seek_user_and_movie_without_topic_scan(self):
+        with EventStore(self.path) as store:
+            queries = []
+            store.connection.set_trace_callback(queries.append)
+            self.save(store, self.watch(1))
+            self.save(store, self.watch(2, timestamp="2026-10-10T12:01:00Z"))
+            store.connection.set_trace_callback(None)
+            pair_queries = [query for query in queries if query.lstrip().startswith(
+                ("SELECT event_timestamp", "DELETE FROM kafka_events"))]
+            self.assertTrue(any(query.lstrip().startswith("DELETE") for query in pair_queries))
+            for query in pair_queries:
+                plan = " ".join(row[3] for row in store.connection.execute("EXPLAIN QUERY PLAN " + query))
+                self.assertIn("user_id=?", plan)
+                self.assertIn("movie_id=?", plan)
+
     def test_parallel_writers_leave_one_latest_watch_and_valid_live_history(self):
         with EventStore(self.path):
             pass

@@ -77,7 +77,7 @@ class EventStore:
                     and parsed.get("user_id") is not None and parsed.get("movie_id") is not None):
                 identity = (envelope.source_id, envelope.topic, parsed["user_id"], parsed["movie_id"])
                 previous = self.connection.execute(f"""
-                    SELECT event_timestamp, broker_timestamp_ms, partition, offset FROM kafka_events
+                    SELECT event_timestamp, broker_timestamp_ms, partition, offset FROM kafka_events INDEXED BY watch_by_user_movie
                     WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
                 """, identity).fetchall()
                 order = watch_order(parsed.get("event_timestamp"), envelope.broker_timestamp_ms,
@@ -85,7 +85,7 @@ class EventStore:
                 if previous and order <= max(watch_order(*row) for row in previous):
                     return False
                 self.connection.execute(f"""
-                    DELETE FROM kafka_events
+                    DELETE FROM kafka_events INDEXED BY watch_by_user_movie
                     WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
                 """, identity)
             cursor = self.connection.execute("""
