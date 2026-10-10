@@ -41,6 +41,9 @@ services:
       LIVE_ENABLED: "1"
       METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${OPENAI_TOKEN:-}}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
     ports:
       - "8082:8082"
     volumes:
@@ -146,6 +149,9 @@ services:
     environment:
       <<: *storage-environment
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
       APP_REVISION: ${APP_REVISION:-unknown}
     volumes:
       - catalog:/app/data:ro

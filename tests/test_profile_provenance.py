@@ -141,6 +141,50 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertIn(self.profile, profile.values())
         self.assertNotIn("sdk-test-secret", json.dumps(attempt))
 
+    def test_azure_request_records_deployment_and_retains_actual_model(self):
+        response = self.response()
+        azure = {
+            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com",
+            "AZURE_OPENAI_DEPLOYMENT": "class-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
+        }
+        with self.sdk(response) as (factory, create, _):
+            with patch.dict("os.environ", azure):
+                saved, cached = self.interpreter.get_profile_record("Crime dramas", "Horror")
+        self.assertFalse(cached)
+        self.assertEqual(factory.call_args.kwargs["base_url"], azure["AZURE_OPENAI_ENDPOINT"] + "/openai/v1/")
+        self.assertEqual(factory.call_args.kwargs["api_key"], "azure-test-key")
+        self.assertEqual(create.call_args.kwargs["model"], "class-mini")
+        self.assertEqual(create.call_args.kwargs["reasoning"], {"effort": "minimal"})
+        self.assertTrue(create.call_args.kwargs["text"]["format"]["strict"])
+        self.assertFalse(create.call_args.kwargs["store"])
+        attempt = self.rows("llm_attempts")[0]
+        self.assertEqual(attempt["versions"]["requested_model"], "class-mini")
+        self.assertEqual(attempt["request"]["model"], "class-mini")
+        self.assertEqual(attempt["request"]["reasoning"], create.call_args.kwargs["reasoning"])
+        self.assertEqual(saved["model"], response.model)
+        self.assertNotIn("azure-test-key", json.dumps(attempt))
+
+    def test_provider_switch_reuses_cache_and_durable_profile_without_relabeling(self):
+        with self.sdk():
+            original, _ = self.interpreter.get_profile_record("Crime dramas", "Horror")
+        before = {table: self.rows(table) for table in ("llm_attempts", "preference_profiles")}
+        azure = {
+            "AZURE_OPENAI_ENDPOINT": "https://example.services.ai.azure.com/openai/v1",
+            "AZURE_OPENAI_DEPLOYMENT": "gpt-5-mini", "AZURE_OPENAI_API_KEY": "azure-test-key",
+        }
+        path = self.cache / (original["_provenance"]["cache_key"] + ".json")
+        for remove_cache in (False, True):
+            with self.subTest(remove_cache=remove_cache):
+                if remove_cache:
+                    path.unlink()
+                with patch.dict("os.environ", azure, clear=True):
+                    with patch("preferences.dotenv_values", side_effect=AssertionError("Reuse read credentials")):
+                        with patch("preferences.OpenAI", side_effect=AssertionError("Reuse called provider")):
+                            reused, cached = self.new_interpreter().get_profile_record("Crime dramas", "Horror")
+                self.assertTrue(cached)
+                self.assertEqual(reused, original)
+                self.assertEqual(before, {table: self.rows(table) for table in before})
+
     def test_pending_attempt_exists_before_api_and_response_is_saved_before_validation(self):
         observed = []
 

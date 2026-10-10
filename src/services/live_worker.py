@@ -39,7 +39,7 @@ class LiveProfileWorker:
         self.fetcher = fetcher
         self.limiter = MetadataRateLimiter()
         self.interpretation_version = content_version({
-            "model": preferences.LLM_MODEL, "instructions": preferences.INSTRUCTIONS,
+            "model": preferences.PROFILE_CACHE_NAMESPACE, "instructions": preferences.INSTRUCTIONS,
             "schema": self.interpreter._response_schema(),
         })
         self.stop_event = threading.Event()
