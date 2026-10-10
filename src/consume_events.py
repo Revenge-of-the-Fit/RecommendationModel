@@ -67,6 +67,10 @@ def main() -> int:
     parser.add_argument("--event-timezone", help="Timezone for timestamps without an offset; unset preserves them as timezone_missing.")
     parser.add_argument("--max-messages", type=positive_int)
     parser.add_argument("--idle-timeout", type=positive_float)
+    parser.add_argument("--batch-size", type=positive_int, default=500)
+    parser.add_argument("--batch-interval", type=positive_float, default=0.5)
+    parser.add_argument("--watch-idle-seconds", type=positive_float, default=300)
+    parser.add_argument("--max-watch-sessions", type=positive_int, default=50000)
     parser.add_argument("--replay-from-start", action="store_true", help="Re-read retained records; use a separate group for validation.")
     parser.add_argument("--run-as-uid", type=positive_int)
     parser.add_argument("--run-as-gid", type=nonnegative_int)
@@ -91,6 +95,8 @@ def main() -> int:
                 event_timezone=arguments.event_timezone, max_messages=arguments.max_messages,
                 idle_timeout=arguments.idle_timeout, replay_from_start=arguments.replay_from_start,
                 stop_event=stopped,
+                batch_size=arguments.batch_size, batch_interval=arguments.batch_interval,
+                watch_idle_seconds=arguments.watch_idle_seconds, max_watch_sessions=arguments.max_watch_sessions,
             )
         print(json.dumps(stats, sort_keys=True))
         return 0 if stats["received"] or arguments.max_messages is None or stopped.is_set() else 1
