@@ -1,15 +1,28 @@
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
-DATABASE_SCHEMA_VERSION = 5
+DATABASE_SCHEMA_VERSION = 6
 DEFAULT_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "live" / "events.sqlite3"
+WATCH_EVENTS = "event_type='watch' AND parse_status='parsed' AND user_id IS NOT NULL AND movie_id IS NOT NULL"
 
 
 class StorageError(RuntimeError):
     pass
+
+
+def watch_order(event_timestamp, broker_timestamp_ms, partition, offset):
+    if event_timestamp:
+        stamp = datetime.fromisoformat(event_timestamp).astimezone(timezone.utc)
+    elif broker_timestamp_ms is not None:
+        stamp = datetime.fromtimestamp(broker_timestamp_ms / 1000, timezone.utc)
+    else:
+        stamp = None
+    timestamp = stamp.isoformat(timespec="microseconds") if stamp else ""
+    return f"{int(stamp is not None)}|{timestamp}|{partition:010d}|{offset:020d}"
 
 
 def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
@@ -17,6 +30,7 @@ def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path, timeout=busy_timeout)
     try:
+        connection.create_function("watch_order", 4, watch_order, deterministic=True)
         connection.execute("PRAGMA busy_timeout=0")
         deadline = time.monotonic() + busy_timeout
         while True:
@@ -197,6 +211,11 @@ def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
                 connection.execute("""
                     INSERT INTO live_users(user_id)
                     SELECT DISTINCT user_id FROM recommendation_requests WHERE user_id IS NOT NULL
+                """)
+            if version < 6:
+                connection.execute(f"""
+                    CREATE INDEX watch_by_user_movie
+                    ON kafka_events(source_id, topic, user_id, movie_id) WHERE {WATCH_EVENTS}
                 """)
             connection.execute(f"PRAGMA user_version={DATABASE_SCHEMA_VERSION}")
             connection.commit()

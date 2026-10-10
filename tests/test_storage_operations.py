@@ -21,7 +21,7 @@ import manage_storage
 import export_observations as observations_cli
 import storage.operations as operations
 from events.parser import parse_event
-from storage.database import StorageError, open_database
+from storage.database import DATABASE_SCHEMA_VERSION, StorageError, open_database
 from storage.events import EventStore, KafkaEnvelope
 from storage.metadata import MetadataStore
 from storage.operations import backup_database, capacity_status, export_records, restore_backup, storage_status
@@ -82,7 +82,7 @@ class StorageOperationsTests(unittest.TestCase):
             self.assertTrue(report["healthy"])
             self.assertTrue(report["integrity_ok"])
             self.assertEqual(report["foreign_key_violations"], 0)
-            self.assertEqual(report["table_counts"]["kafka_events"], 2)
+            self.assertEqual(report["table_counts"]["kafka_events"], 1)
             self.assertGreater(report["wal_bytes"], 0)
             limited = storage_status(self.path, max_database_bytes=report["database_bytes"])
             self.assertFalse(limited["healthy"])
@@ -120,7 +120,11 @@ class StorageOperationsTests(unittest.TestCase):
                     number = 2
                     while not stop.is_set():
                         requests.save_request(request_record(number))
-                        events.save_event(envelope(number), parse_event(self.initial.value))
+                        item = envelope(
+                            number,
+                            value=f"2026-10-08T12:01:00+00:00,42,GET /data/m/movie_{number}/17.mpg".encode(),
+                        )
+                        events.save_event(item, parse_event(item.value))
                         entered.set()
                         number += 1
             except Exception as error:
@@ -304,7 +308,10 @@ class StorageOperationsTests(unittest.TestCase):
             self.assertIsNone(events.get_event("course-cluster", "movielog2", 3, 4)["raw_value"])
 
     def test_raw_filters_separate_event_time_and_availability_and_preserve_unknown_records(self):
-        late = envelope(2, ingested_at="2026-10-08T13:00:00+00:00")
+        late = envelope(
+            2, value=b"2026-10-08T12:01:00+00:00,42,GET /data/m/movie_b/17.mpg",
+            ingested_at="2026-10-08T13:00:00+00:00",
+        )
         other = envelope(3, source_id="other-source")
         topic = envelope(4, topic="another-topic")
         naive = envelope(5, value=b"2026-10-08T12:01:00,42,GET /rate/movie_a=9")
@@ -372,7 +379,7 @@ class StorageOperationsTests(unittest.TestCase):
         self.assertEqual(attempts, ["pending", "responded"])
         self.assertNotIn("later response", output.getvalue())
         manifest = backup_database(self.path, self.archives)
-        self.assertEqual(manifest["schema_version"], 5)
+        self.assertEqual(manifest["schema_version"], DATABASE_SCHEMA_VERSION)
         restored = self.directory / "all-lineage.sqlite3"
         self.assertEqual(restore_backup(manifest["archive_path"], restored)["foreign_key_violations"], 0)
         recovered = io.StringIO()
@@ -422,7 +429,7 @@ class StorageOperationsTests(unittest.TestCase):
         self.assertNotIn(str(restored), errors.getvalue())
         with redirect_stdout(io.StringIO()):
             self.assertEqual(manage_storage.main(["status", "--storage-path", str(self.directory / "missing.sqlite3")]), 1)
-        self.assertIn("never purged", manage_storage.build_parser().format_help())
+        self.assertIn("latest valid watch request per user/movie", manage_storage.build_parser().format_help())
 
     def test_cli_uses_storage_environment_and_explicit_path_overrides_it(self):
         alternate = self.directory / "alternate.sqlite3"

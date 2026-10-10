@@ -5,20 +5,22 @@ import sys
 from pathlib import Path
 
 from storage.database import DEFAULT_STORAGE_PATH, StorageError
-from storage.operations import TABLES, backup_database, export_records, restore_backup, storage_status
+from storage.operations import TABLES, backup_database, compact_watch_events, export_records, restore_backup, storage_status
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Inspect, archive, recover, or export the append-only observation database.",
-        epilog="Retention rotates archived gzip backups only; live requests, Kafka events, metadata, and profiles are never purged. Restore requires a new path and the matching archive manifest. Exports retain stored JSON and encode binary columns as explicit base64 objects.",
+        description="Inspect, archive, recover, compact, or export the observation database.",
+        epilog="Only the latest valid watch request per user/movie is retained. Other events, requests, metadata, and profiles remain available. Restore requires a new path and the matching archive manifest. Exports retain stored JSON and encode binary columns as explicit base64 objects.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     status = commands.add_parser("status", help="Report integrity, row counts, and configured capacity guards")
     backup = commands.add_parser("backup", help="Create a consistent verified SQLite gzip backup, then rotate old archives")
     restore = commands.add_parser("restore", help="Integrity-check and restore a backup into a new database path")
     export = commands.add_parser("export", help="Stream stored records to JSONL for recovery or later analysis")
-    for command in (status, backup, export):
+    compact = commands.add_parser("compact-watches", help="Keep the latest watch per user/movie; run with database writers stopped")
+    compact.add_argument("--reclaim-space", action="store_true", help="Also run offline VACUUM to shrink the database file; requires space for a temporary copy")
+    for command in (status, backup, export, compact):
         command.add_argument("--storage-path", type=Path, default=os.environ.get("STORAGE_PATH", DEFAULT_STORAGE_PATH))
     for command in (status, backup, restore):
         command.add_argument("--min-free-bytes", type=int, default=0)
@@ -58,6 +60,8 @@ def main(argv=None):
             )
         elif arguments.command == "restore":
             result = restore_backup(arguments.archive, arguments.target, min_free_bytes=arguments.min_free_bytes)
+        elif arguments.command == "compact-watches":
+            result = compact_watch_events(arguments.storage_path, arguments.reclaim_space)
         else:
             result = export_records(
                 arguments.storage_path, arguments.output or sys.stdout, tables=arguments.table,

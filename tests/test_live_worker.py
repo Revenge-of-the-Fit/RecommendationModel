@@ -18,6 +18,7 @@ from preferences import ColdStartError
 from services.live_worker import LiveProfileWorker
 from services.metadata import MetadataBatch, MetadataRateLimiter
 from storage.live import LiveStore
+from storage.requests import RequestStore
 
 
 class LiveWorkerTests(unittest.TestCase):
@@ -50,6 +51,13 @@ class LiveWorkerTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as connection:
             connection.row_factory = sqlite3.Row
             return dict(connection.execute("SELECT * FROM live_users WHERE user_id=?", (user_id,)).fetchone())
+
+    def request(self, user_id, request_id, started_at=None):
+        with RequestStore(self.path) as requests:
+            requests.save_request({
+                "request_id": request_id, "user_id": user_id,
+                "started_at": (started_at or self.now).isoformat(),
+            })
 
     @staticmethod
     def batch(likes="Drama", dislikes=None):
@@ -148,6 +156,84 @@ class LiveWorkerTests(unittest.TestCase):
         worker.run_once(fetch)
         self.assertEqual([len(call.args[1]) for call in fetch.call_args_list], [200, 1])
         self.interpreter.get_profile_record.assert_not_called()
+
+    def test_recent_requesters_advance_within_signup_and_request_priorities_without_bypassing_deadlines(self):
+        with LiveStore(self.path) as live:
+            for user, priority in ((1, 1), (999, 1), (2, 0), (998, 0), (3, 2), (997, 2), (1001, 0), (1002, 1)):
+                live.enqueue(user, priority=priority)
+            live.fail(1001, "APITimeoutError", True, 60, now=self.now.timestamp())
+            live.complete(1002, {"profile": None}, "version", 60, now=self.now.timestamp())
+        self.request(999, "recent-high-id")
+        self.request(1, "late-inserted-old-request", self.now - timedelta(days=5))
+        self.request(998, "active-signup")
+        self.request(997, "active-watch-user")
+        self.request(1001, "retrying-signup")
+        self.request(1002, "refreshing-user")
+        with LiveStore(self.path) as live:
+            selected = [row["user_id"] for row in live.due_users(self.now.timestamp())]
+        self.assertEqual(selected, [998, 2, 997, 999, 1, 3])
+        self.assertEqual(self.user(997)["priority"], 1)
+        self.assertEqual(self.user(3)["priority"], 2)
+        self.assertEqual(self.user(1001)["attempts"], 1)
+        self.assertEqual(self.user(1001)["next_attempt_at"], self.now.timestamp() + 2)
+        self.assertEqual(self.user(1002)["next_attempt_at"], self.now.timestamp() + 60)
+
+    def test_first_five_interpretations_yield_to_a_request_arriving_during_the_batch(self):
+        self.enqueue(*range(1, 8))
+        interpreted = []
+
+        def interpret(*_, context, **__):
+            interpreted.append(context["user_id"])
+            if len(interpreted) == 1:
+                self.request(999, "request-arrived-during-interpretation")
+            return self.saved, False
+
+        self.interpreter.get_profile_record.side_effect = interpret
+        worker = self.worker()
+        fetch = Mock(side_effect=self.batch())
+        worker.run_once(fetch)
+        self.assertEqual(interpreted, [1, 2, 3, 4, 5])
+        self.assertIsNone(self.user(6)["record_json"])
+        self.assertIsNone(self.user(7)["record_json"])
+        worker.run_once(fetch)
+        self.assertEqual(interpreted, [1, 2, 3, 4, 5, 999, 6, 7])
+        self.assertEqual(fetch.call_args_list[0].args[1], [str(user) for user in range(1, 8)])
+        self.assertEqual(fetch.call_args_list[1].args[1], ["999"])
+        self.assertIsNotNone(self.user(999)["record_json"])
+
+    def test_failed_provider_calls_consume_the_five_call_budget_and_later_users_stay_due(self):
+        self.enqueue(*range(1, 8))
+        self.interpreter.get_profile_record.side_effect = ColdStartError(
+            "provider timeout", {"provider_error_type": "APITimeoutError"},
+        )
+        worker = self.worker()
+        worker.run_once(self.batch())
+        self.assertEqual(self.interpreter.get_profile_record.call_count, 5)
+        for user in range(1, 6):
+            self.assertEqual(self.user(user)["attempts"], 1)
+            self.assertEqual(self.user(user)["next_attempt_at"], self.now.timestamp() + 2)
+        for user in (6, 7):
+            self.assertEqual(self.user(user)["attempts"], 0)
+            self.assertIsNone(self.user(user)["last_error"])
+            self.assertIsNone(self.user(user)["record_json"])
+        worker.run_once(self.batch())
+        selected = [call.kwargs["context"]["user_id"] for call in self.interpreter.get_profile_record.call_args_list]
+        self.assertEqual(selected, list(range(1, 8)))
+
+    def test_users_without_descriptions_do_not_consume_interpretation_budget(self):
+        self.enqueue(*range(1, 9))
+
+        def mixed_batch(_, ids):
+            return MetadataBatch(200, {
+                user: {"user_id": int(user), "self_description_likes": None if int(user) < 4 else "Drama", "self_description_dislikes": None}
+                for user in ids
+            })
+
+        self.worker().run_once(mixed_batch)
+        selected = [call.kwargs["context"]["user_id"] for call in self.interpreter.get_profile_record.call_args_list]
+        self.assertEqual(selected, [4, 5, 6, 7, 8])
+        for user in range(1, 9):
+            self.assertIsNotNone(self.user(user)["record_json"])
 
     def test_one_background_thread_and_shutdown_wait_is_bounded(self):
         entered, release = threading.Event(), threading.Event()

@@ -474,6 +474,7 @@ class LiveUserTests(unittest.TestCase):
             exact = connection.execute("SELECT source_id,topic,partition,offset,source_fingerprint,raw_value,parsed_json FROM kafka_events ORDER BY source_id,offset").fetchall()
             for table in ("live_event_cursors", "live_interactions", "live_users"):
                 connection.execute(f"DROP TABLE {table}")
+            connection.execute("DROP INDEX watch_by_user_movie")
             connection.execute("PRAGMA user_version=4")
             connection.commit()
         with LiveStore(self.path) as live:

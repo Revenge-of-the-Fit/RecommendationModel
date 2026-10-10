@@ -116,8 +116,9 @@ class LiveProfileWorker:
                         failures[user_id] = (
                             category, transient_failure(category, attempt["http_status"]),
                         )
+                profile_calls = 0
                 for job in pending:
-                    if self.stop_event.is_set():
+                    if self.stop_event.is_set() or profile_calls >= 5:
                         break
                     user_id = job["user_id"]
                     snapshot = collection.snapshots.get(str(user_id))
@@ -142,6 +143,7 @@ class LiveProfileWorker:
                             )
                             positive, _ = merge_history(self.model, user_id, history) if self.model is not None else (set(), set())
                             if not positive or previous.get("profile") is not None:
+                                profile_calls += 1
                                 profile, _ = self.interpreter.get_profile_record(
                                     likes, dislikes, offline=False,
                                     context={"user_id": user_id, "source_snapshot_id": snapshot["snapshot_id"]},

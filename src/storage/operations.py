@@ -14,7 +14,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from storage.database import StorageError
+from storage.database import WATCH_EVENTS, StorageError, open_database
 
 
 TABLES = (
@@ -24,6 +24,39 @@ TABLES = (
 )
 ARCHIVE_PATTERN = re.compile(r"observations-backup-[0-9]{8}T[0-9]{12}Z-[0-9a-f]{32}\.sqlite3\.gz")
 CHUNK_BYTES = 1024 * 1024
+
+
+def compact_watch_events(path, reclaim_space=False):
+    path = Path(path)
+    if not path.is_file():
+        raise StorageError("Storage database is missing")
+    try:
+        with closing(open_database(path, busy_timeout=30)) as connection:
+            connection.execute("PRAGMA temp_store=FILE")
+            with connection:
+                connection.execute("BEGIN IMMEDIATE")
+                cursor = connection.execute(f"""
+                    DELETE FROM kafka_events WHERE (source_id, topic, partition, offset) IN (
+                        SELECT source_id, topic, partition, offset FROM (
+                            SELECT source_id, topic, partition, offset,
+                                row_number() OVER (
+                                    PARTITION BY source_id, topic, user_id, movie_id
+                                    ORDER BY watch_order(event_timestamp, broker_timestamp_ms, partition, offset) DESC
+                                ) AS position
+                            FROM kafka_events WHERE {WATCH_EVENTS}
+                        ) WHERE position>1
+                    )
+                """)
+                removed = cursor.rowcount
+                retained = connection.execute(f"SELECT count(*) FROM kafka_events WHERE {WATCH_EVENTS}").fetchone()[0]
+            if reclaim_space:
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                connection.execute("VACUUM")
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            return {"removed_watch_events": removed, "retained_watch_events": retained,
+                    "reclaimed_space": reclaim_space}
+    except sqlite3.Error:
+        raise StorageError("Watch compaction failed; stop all database writers before retrying") from None
 
 
 def _limits(min_free_bytes, max_database_bytes):
@@ -625,7 +658,7 @@ def export_observations(path, output, *, source_id=None, topic=None, start=None,
                     "attribution": "candidate_only", "fields": fields,
                 }
                 if row["event_type"] == "watch":
-                    observed["observation_unit"] = "movie_minute"
+                    observed["observation_unit"] = "latest_requested_minute"
                     observed["observed_minute"] = fields.get("minute")
                 else:
                     observed["rating"] = fields.get("rating")

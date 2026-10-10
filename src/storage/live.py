@@ -125,8 +125,13 @@ class LiveStore:
 
     def due_users(self, now=None, limit=200, interpretation_version=None):
         rows = self.connection.execute("""
-            SELECT * FROM live_users WHERE next_attempt_at<=?
-            ORDER BY priority, next_attempt_at, user_id LIMIT ?
+            SELECT u.* FROM live_users u WHERE u.next_attempt_at<=?
+            ORDER BY u.priority,
+                CASE WHEN u.priority<2 THEN (
+                    SELECT r.started_at FROM recommendation_requests r WHERE r.user_id=u.user_id
+                    ORDER BY r.started_at DESC, r.request_id DESC LIMIT 1
+                ) END DESC,
+                u.next_attempt_at, u.user_id LIMIT ?
         """, (time.time() if now is None else now, limit))
         jobs = [dict(row) for row in rows]
         if interpretation_version is not None:
