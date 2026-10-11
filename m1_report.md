@@ -92,18 +92,7 @@ Cold-start ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/bl
 
 ### Production verification
 
-We checked the course's Kafka records for our server from **October 10, 2026, 12:20 UTC to October 11, 2026, 12:20 UTC**. This is a pre-submission check.
-
-| Check | Result |
-|---|---|
-| All course requests, including failures | 368,435 |
-| Successful status-200 responses with valid IDs | 368,008 |
-| Confirmed personalized successes / all requests | 215,227 / 368,435 = **58.4%** |
-| Course response time, p50 / p95 | 15 / 40 ms |
-
-We deduplicate by Kafka source, topic, partition, and offset. To confirm personalization, we match the user, ordered movie IDs, and time to one API record, then count EASE or cached cold-start responses. These include 133,104 users and 46,287 different rankings. Our manual probes do not count. There were 427 course failures and 17 successful responses above 600 ms (maximum 631 ms).
-
-All 24 external probes passed the plain-text, catalog, and latency checks, including six concurrent callers and known, live-history, cold-start, and pending-profile users. Forty focused tests passed, including simulated dependency failures and restart recovery. [Saved results, code/model versions, and rerun instructions](verification/README.md).
+[Saved results, code/model versions, and rerun instructions](verification/README.md).
 
 ## Containerization and deployment
 
@@ -119,7 +108,7 @@ cd /home/production
 sudo docker compose --project-name recommendationmodel up -d --build
 ```
 
-On October 11, we reproduced startup from Muhammad's VM account using the existing images and configuration. The running revision is `7ef70ef`, whose API source matches current main. Replacing the API preserved sampled request records, profiles, cache files, and the model checksum. Kafka continued capturing events. The API returned healthy after a roughly 48-second interruption, with 167 course connection failures during replacement. [Evidence](verification/deployment-2026-10-11.json).
+Kafka tunnel script: https://raw.githubusercontent.com/mlip-cmu-online/lab-kafka/main/connect-kafka
 
 This view below answers the question: **How do requests use the model while cold-start profiles are prepared in the background?**
 
