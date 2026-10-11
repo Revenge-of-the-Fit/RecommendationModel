@@ -74,29 +74,31 @@ Limits of this comparison: We tested using users with rating history only, so pe
 
 Our recommendation service uses EASE to rank movies based on the user's history. We use FastAPI to serve requests at `http://CMU-ONLINE-MLIP-VM02.ANDREW.CMU.EDU:8082/recommend/<userid>`. The service returns up to 20 movie IDs in a single comma separated line, ordered from highest to lowest recommendation. The model is loaded when the service starts so that we do not have to load it again for every request.
 
-Request handling: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/api/routes.py  
+Request handling: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/api/routes.py
 
 To start, EASE learns movie-to-movie relationships from binary user profiles. A rating of at least 6 out of 10 or a watch without a rating counts as a positive interaction. Provisioning defaults to regularization 100 and minimum rating 6. When making recommendations, we simply add the learned weight rows for the user's positive movies to produce a score for each candidate movie. Movies the user has already seen and movies without positive training interactions are excluded. We sort the remaining movies by score, using popularity and then movie ID to break ties.
 
-Training: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/train.py  
-Ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/recommender.py  
+Training: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/train.py
+Ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/recommender.py
 
 In addition, the service reads watch and rating events from the course's `movielog2` Kafka topic. We combine this activity with the user's original training history when making recommendations. An explicit rating takes precedence over a watch, and the latest rating replaces an older rating. This allows us to use EASE for users who were not in the original dataset as long as they have positive interactions with supported movies. The learned EASE weights remain the same; our changes allow the running service to use new history and prepare cold-start profiles automatically.
 
-Serving: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/services/recommendation.py  
+Serving: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/services/recommendation.py
 
 For users without supported positive history, our background worker retrieves their likes and dislikes from the metadata API. Registration events automatically queue this work, and recommendation requests also queue users whose registration we did not receive. If they have descriptions, GPT6 Luna interprets them into genres, movie examples, and preference summaries. The cold-start ranking combines similarity to movie text, preferred genres, EASE relationships from the examples, and popularity. Disliked text reduces scores, while excluded genres and movies the user already knows are removed. Profiles are saved and reused after restarts. While a profile is being prepared, or if the user has neither descriptions nor supported history, the service returns popular unseen movies. This means that a recommendation request does not have to wait for an LLM response.
 
-Cold-start preparation: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/services/live_worker.py  
-Cold-start ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/cold_start.py  
+Cold-start preparation: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/services/live_worker.py
+Cold-start ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/cold_start.py
+
+### Production verification
+
+[Saved results, code/model versions, and rerun instructions](verification/README.md).
 
 ## Containerization and deployment
 
 We use a Dockerfile and Docker Compose to deploy the service from `/home/production` on our VM over SSH. Provisioning downloads the catalog and trains EASE on first startup; later starts reuse the model. Compose runs the API, Kafka consumer, and storage maintenance. The background profile worker runs inside the API container. Named volumes preserve the model, history, and profiles when containers are replaced.
 
-Dockerfile: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/Dockerfile  
-Compose: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/compose.yaml  
-Provisioning: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/scripts/provision.py  
+[Dockerfile](Dockerfile), [Compose](compose.yaml), [provisioning](scripts/provision.py), and [setup instructions](DEPLOYMENT.md).
 
 The VM needs Docker Compose, `kcat`, and the course's Kafka tunnel with its private `mlip-kafka.conf` configuration. We start the tunnel with `bash ./connect-kafka kafkatunnel@128.2.24.239 9092` and keep it running in a separate SSH session. Our private `.env` supplies `OPENAI_API_KEY` and `KAFKA_CONFIG_DIRECTORY=/home/production/.config`. To start the service:
 

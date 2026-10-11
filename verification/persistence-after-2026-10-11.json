@@ -1,0 +1,69 @@
+{
+  "checked_at_utc": "2026-10-11T12:29:02.395277+00:00",
+  "container_hostname": "e0e8f2bd34f5",
+  "revision": "7ef70ef47da3e92029c44ead8113aec0ffea9e01",
+  "code_version": "sha256:deab0af81b9de565680533aa2c7d6ad0d26268155bf0a125eb9da093acbb8cf9",
+  "model_version": "sha256:642573e7bae94cd2c7281298004b3d9a4735bee885c0dcc846f3f87ea11bc75a",
+  "records_preserved": {
+    "aa6a447aa7764a5ca029b00dcdde9ec2": true,
+    "f665b7da22fa43cf98ac6e41693fa461": true,
+    "3b043f9d571e42019d9f6554de8f2412": true
+  },
+  "profiles_preserved": {
+    "496d63e8d7bf471990c962123ccfd890": true,
+    "a2b594faaff54d6b9a78f20a1c1154ea": true,
+    "e08cb24fa9ab4b749c7316864366396d": true
+  },
+  "live_user_profiles_preserved": {
+    "3": true,
+    "487905": true
+  },
+  "cache_files_preserved": {
+    "/app/state/cache/0003023b86eb3e38dc02a8f8ea455d775654637c2951b89cbf0446362a445da3.json": true,
+    "/app/state/cache/00037f39e0d5dfbcf04f10865624604101872279cb4627dc8bf384448adf370b.json": true,
+    "/app/state/cache/00086f41e5344d6bd9973e3e52e4c88e0402159d9fb50ef1767c76340249a2d2.json": true
+  },
+  "live_users_count": 316253,
+  "live_interactions_count": 651063,
+  "latest_course_offsets": {
+    "0": 402921296,
+    "1": 402921220
+  },
+  "new_container": true,
+  "same_code_and_model": true,
+  "kafka_capture_continues": true,
+  "readiness": {
+    "status": 200,
+    "body": {
+      "status": "ready"
+    }
+  },
+  "storage_health": {
+    "accepted": 122,
+    "written": 122,
+    "duplicates": 0,
+    "failed": 0,
+    "rejected": 0,
+    "queued": 0,
+    "healthy": true,
+    "last_error": null,
+    "last_write_at": "2026-10-11T12:29:02.133148+00:00",
+    "capture_failed": 0,
+    "unavailable": 0,
+    "capacity": {
+      "healthy": true,
+      "exists": true,
+      "database_bytes": 7708082176,
+      "wal_bytes": 35786352,
+      "shm_bytes": 98304,
+      "total_bytes": 7743966832,
+      "free_bytes": 221531484160,
+      "min_free_bytes": 1073741824,
+      "max_database_bytes": 103079215104,
+      "capacity_ok": true,
+      "capacity_reasons": [],
+      "last_error": null
+    },
+    "profile_import_error": null
+  }
+}

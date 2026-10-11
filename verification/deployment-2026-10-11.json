@@ -1,0 +1,14 @@
+{
+  "vm_account": "mfouly",
+  "working_directory": "/home/production",
+  "startup_command": "sudo docker compose --project-name recommendationmodel up -d --no-build --no-recreate",
+  "startup_result": "exit 0; provision reused the model and API healthy",
+  "replacement_command": "sudo docker compose --project-name recommendationmodel up -d --no-build --no-deps --force-recreate api",
+  "replacement_result": "exit 0; new API container and preserved sampled state",
+  "restart_course_failures": {
+    "observed_connection_failures": 167,
+    "first_failure_utc": "2026-10-11T12:27:36.006373+00:00",
+    "last_failure_utc": "2026-10-11T12:28:23.032344+00:00"
+  },
+  "limits": "Startup reproduction reused the existing images, private configuration, tunnel and named volumes. It was not a fresh VM installation. Only the API container was replaced."
+}
