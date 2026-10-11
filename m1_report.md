@@ -113,3 +113,9 @@ This view below answers the question: **How do requests use the model while cold
 ![Recommendation service architecture](m1_architecture.svg)
 
 Running the background profile worker inside the API container keeps deployment and sharing local state simple. However, the worker shares the API's CPU and memory, and profile preparation stops during API restarts.
+
+## Team contract and meeting notes
+Team Contract: https://docs.google.com/document/d/1NrsM_D8UhIbiRCPWYNDLIFux-UsOtMbJWYL6N15hTTQ
+Meeting Notes: https://docs.google.com/document/d/17ckS4iwvLpXf03RaBC4E9F9yv9pQtQ6w2AmA64wcab4
+Github Project Board: https://github.com/orgs/Revenge-of-the-Fit/projects/1/views/1
+Github Issues: https://github.com/Revenge-of-the-Fit/RecommendationModel/issues
