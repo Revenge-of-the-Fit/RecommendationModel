@@ -1,0 +1,32 @@
+{
+  "checked_at_utc": "2026-10-11T12:34:59.228987+00:00",
+  "group": "team2-live-m1-v1",
+  "topic": "movielog2",
+  "partitions": [
+    {
+      "partition": 0,
+      "earliest_offset": 293848629,
+      "end_offset_exclusive": 402983687,
+      "committed_offset": 398284646,
+      "committed_offset_lag": 4699041,
+      "latest_stored_offset": 402983508,
+      "latest_event_timestamp_utc": "2026-10-11T12:34:58.112138+00:00",
+      "latest_ingested_at_utc": "2026-10-11T12:34:58.132002+00:00",
+      "head_minus_latest_stored_offset": 178
+    },
+    {
+      "partition": 1,
+      "earliest_offset": 293926551,
+      "end_offset_exclusive": 402983688,
+      "committed_offset": 398304378,
+      "committed_offset_lag": 4679310,
+      "latest_stored_offset": 402983507,
+      "latest_event_timestamp_utc": "2026-10-11T12:34:58.111005+00:00",
+      "latest_ingested_at_utc": "2026-10-11T12:34:58.132183+00:00",
+      "head_minus_latest_stored_offset": 180
+    }
+  ],
+  "missing_recommendation_timestamps": 0,
+  "timestamp_check": "Recent course event times and Kafka broker timestamps agree within milliseconds; consumer event timezone is UTC.",
+  "limits": "Read-only broker queries; no subscription or commits. Stored events are current, but committed offsets lag: buffered watches pin the safe replay position until saved. Offset proximity alone does not prove that every event was captured."
+}

@@ -1,0 +1,82 @@
+{
+  "checked_at_utc": "2026-10-11T12:30:52.522107+00:00",
+  "counts": {
+    "all_course_requests": 368435,
+    "confirmed_personalized_successes": 215227,
+    "invalid_status_200_results": 0,
+    "status_0": 427,
+    "status_200": 368008,
+    "successful_course_requests": 368008,
+    "successful_requests_without_unique_api_match": 14,
+    "uniquely_matched_successes": 367994
+  },
+  "course_event_offsets_by_partition": {
+    "0": {
+      "first": 379319397,
+      "last": 402827103
+    },
+    "1": {
+      "first": 379319397,
+      "last": 402827102
+    }
+  },
+  "course_success_latency_ms": {
+    "max": 631.0,
+    "over_600_ms": 17,
+    "p50": 15.0,
+    "p95": 40.0,
+    "samples": 368008
+  },
+  "distinct_personalized_rankings": 46287,
+  "first_course_event_in_window_utc": "2026-10-10T12:20:00.058758+00:00",
+  "last_course_event_in_window_utc": "2026-10-11T12:19:59.028176+00:00",
+  "limits": "Counts cover captured records only. Check Kafka capture/lag and rerun with the actual submission time before claiming a grading window. API timings exclude the network round trip.",
+  "matched_api_latency_ms": {
+    "max": 611.5542131010443,
+    "p50": 8.14,
+    "p95": 28.784
+  },
+  "matched_serving_methods": {
+    "ease": 205942,
+    "llm_cold_start": 9285,
+    "popularity": 152767
+  },
+  "matched_versions": [
+    {
+      "requests": 131245,
+      "versions": {
+        "code": "sha256:c99b41ef00bf1610abbb8dacc63491b918e12d8bb156f6595f86c0fc9e68320d",
+        "dataset": "sha256:f45b10a6bd359bdeb5d0ea3aaa0b188fb3748e55b5e11c7caa5035dba2d175b8",
+        "model": "sha256:642573e7bae94cd2c7281298004b3d9a4735bee885c0dcc846f3f87ea11bc75a"
+      }
+    },
+    {
+      "requests": 18929,
+      "versions": {
+        "code": "sha256:a15a6e209b8f36c22aba94a57f755f3fe8ca76de61fb3feaa3da87516b2ac439",
+        "dataset": "sha256:f45b10a6bd359bdeb5d0ea3aaa0b188fb3748e55b5e11c7caa5035dba2d175b8",
+        "model": "sha256:642573e7bae94cd2c7281298004b3d9a4735bee885c0dcc846f3f87ea11bc75a"
+      }
+    },
+    {
+      "requests": 217820,
+      "versions": {
+        "code": "sha256:deab0af81b9de565680533aa2c7d6ad0d26268155bf0a125eb9da093acbb8cf9",
+        "dataset": "sha256:f45b10a6bd359bdeb5d0ea3aaa0b188fb3748e55b5e11c7caa5035dba2d175b8",
+        "model": "sha256:642573e7bae94cd2c7281298004b3d9a4735bee885c0dcc846f3f87ea11bc75a"
+      }
+    }
+  ],
+  "method": "Kafka identities (source/topic/partition/offset) are unique in storage. Match course successes to API records by user, SHA-256 of ordered IDs, and timestamps within 5 seconds; require a one-to-one match. Count only EASE or cached cold-start matches as personalized. Failures stay in the denominator. Local probes cannot add course successes.",
+  "observed_thresholds": {
+    "at_least_10_percent_personalized": true,
+    "at_least_2000_successes": true
+  },
+  "personalized_percent_of_all_requests": 58.417,
+  "personalized_users": 133104,
+  "server_hosts": [
+    "cmu-online-mlip-vm02.andrew.cmu.edu"
+  ],
+  "window_end_exclusive_utc": "2026-10-11T12:20:00+00:00",
+  "window_start_inclusive_utc": "2026-10-10T12:20:00+00:00"
+}
