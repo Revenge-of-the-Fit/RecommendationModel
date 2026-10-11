@@ -90,13 +90,26 @@ For users without supported positive history, our background worker retrieves th
 Cold-start preparation: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/services/live_worker.py
 Cold-start ranking: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/src/cold_start.py
 
+### Production verification
+
+We checked the course's Kafka records for our server from **October 10, 2026, 12:20 UTC to October 11, 2026, 12:20 UTC**. This is a pre-submission check.
+
+| Check | Result |
+|---|---|
+| All course requests, including failures | 368,435 |
+| Successful status-200 responses with valid IDs | 368,008 |
+| Confirmed personalized successes / all requests | 215,227 / 368,435 = **58.4%** |
+| Course response time, p50 / p95 | 15 / 40 ms |
+
+We deduplicate by Kafka source, topic, partition, and offset. To confirm personalization, we match the user, ordered movie IDs, and time to one API record, then count EASE or cached cold-start responses. These include 133,104 users and 46,287 different rankings. Our manual probes do not count. There were 427 course failures and 17 successful responses above 600 ms (maximum 631 ms).
+
+All 24 external probes passed the plain-text, catalog, and latency checks, including six concurrent callers and known, live-history, cold-start, and pending-profile users. Forty focused tests passed, including simulated dependency failures and restart recovery. [Saved results, code/model versions, and rerun instructions](verification/README.md).
+
 ## Containerization and deployment
 
 We use a Dockerfile and Docker Compose to deploy the service from `/home/production` on our VM over SSH. Provisioning downloads the catalog and trains EASE on first startup; later starts reuse the model. Compose runs the API, Kafka consumer, and storage maintenance. The background profile worker runs inside the API container. Named volumes preserve the model, history, and profiles when containers are replaced.
 
-Dockerfile: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/Dockerfile
-Compose: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/compose.yaml
-Provisioning: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/main/scripts/provision.py
+[Dockerfile](Dockerfile), [Compose](compose.yaml), [provisioning](scripts/provision.py), and [setup instructions](DEPLOYMENT.md).
 
 The VM needs Docker Compose, `kcat`, and the course's Kafka tunnel with its private `mlip-kafka.conf` configuration. We start the tunnel with `bash ./connect-kafka kafkatunnel@128.2.24.239 9092` and keep it running in a separate SSH session. Our private `.env` supplies `OPENAI_API_KEY` and `KAFKA_CONFIG_DIRECTORY=/home/production/.config`. To start the service:
 
@@ -106,10 +119,14 @@ cd /home/production
 sudo docker compose --project-name recommendationmodel up -d --build
 ```
 
-Kafka tunnel script: https://raw.githubusercontent.com/mlip-cmu-online/lab-kafka/main/connect-kafka
+On October 11, we reproduced startup from Muhammad's VM account using the existing images and configuration. The running revision is `7ef70ef`, whose API source matches current main. Replacing the API preserved sampled request records, profiles, cache files, and the model checksum. Kafka continued capturing events. The API returned healthy after a roughly 48-second interruption, with 167 course connection failures during replacement. [Evidence](verification/deployment-2026-10-11.json).
 
 This view below answers the question: **How do requests use the model while cold-start profiles are prepared in the background?**
 
 ![Recommendation service architecture](m1_architecture.svg)
 
 Running the background profile worker inside the API container keeps deployment and sharing local state simple. However, the worker shares the API's CPU and memory, and profile preparation stops during API restarts.
+
+## Team contract and meeting notes
+
+[Team Contract - MLIP Team 2](https://docs.google.com/document/d/1NrsM_D8UhIbiRCPWYNDLIFux-UsOtMbJWYL6N15hTTQ/edit).
