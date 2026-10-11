@@ -2,15 +2,15 @@
 
 ## Model comparison
 
-Evaluation tool: https://github.com/Revenge-of-the-Fit/RecommendationModel/tree/add-model-comparison-harness/model_comparison
+Evaluation tool: https://github.com/Revenge-of-the-Fit/RecommendationModel/tree/add-model-comparison-harness/model_comparison  
 Tests each model through an adapter without editing its source and prints results against a popularity baseline.
 
 ### Milestone 0 Model Repositories
 
-William: https://github.com/Helixan/RecommendationModel
-Sara: https://github.com/MajorTomLanded/rec-zilla
-Muhammad: https://github.com/MuhammadDF/S3D17645_M0
-Daniel: https://github.com/d-urbonas/CMU-MLinProd
+William: https://github.com/Helixan/RecommendationModel  
+Sara: https://github.com/MajorTomLanded/rec-zilla  
+Muhammad: https://github.com/MuhammadDF/S3D17645_M0  
+Daniel: https://github.com/d-urbonas/CMU-MLinProd  
 
 ### Four Qualities
 
@@ -22,7 +22,7 @@ Data: We used the course M0 events, users, and movies. Watch/rating events are g
 
 Operationalization: To repeat the split, sort user-movie pairs and shuffle each user's pairs with one NumPy `default_rng(42)` generator. Take `max(1, floor(0.2 * pairs))` for each held-out set and train on the rest; histories with fewer than three pairs remain in training. We chose each model's hyperparameters by the best validation NDCG@10 on 200 sampled users with a relevant validation movie, then refit on train plus validation. After that we took each test user's top 10 once movies already watched or rated in train plus validation and IDs outside the catalog were removed. Daniel's model uses self-descriptions, so we scored it on the 665 test users with nonempty likes. Every model also got scored on the same fixed 50 of those users. Sample sorted eligible user IDs without replacement using seed 42. Empty recommendation lists score zero.
 
-Accuracy measurement: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/add-model-comparison-harness/model_comparison/metrics.py
+Accuracy measurement: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/add-model-comparison-harness/model_comparison/metrics.py  
 
 #### Training cost
 
@@ -48,7 +48,7 @@ Data: We used the fitted model.
 
 Operationalization: We measured `len(pickle.dumps(model, protocol=pickle.HIGHEST_PROTOCOL))`, divided by `2**20`. For Sara we serialized the model's state, including MovieLens ratings. For Daniel we measured his catalog-embeddings file.
 
-Training, inference, and size measurements: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/add-model-comparison-harness/model_comparison/costs.py
+Training, inference, and size measurements: https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/add-model-comparison-harness/model_comparison/costs.py  
 
 | Measure | William | Sara | Muhammad | Daniel | popularity (baseline) |
 |---|---|---|---|---|---|
@@ -117,5 +117,7 @@ This view below answers the question: **How do requests use the model while cold
 Running the background profile worker inside the API container keeps deployment and sharing local state simple. However, the worker shares the API's CPU and memory, and profile preparation stops during API restarts.
 
 ## Team contract and meeting notes
-
-[Team Contract - MLIP Team 2](https://docs.google.com/document/d/1NrsM_D8UhIbiRCPWYNDLIFux-UsOtMbJWYL6N15hTTQ/edit).
+Team Contract: https://docs.google.com/document/d/1NrsM_D8UhIbiRCPWYNDLIFux-UsOtMbJWYL6N15hTTQ  
+Meeting Notes: https://docs.google.com/document/d/17ckS4iwvLpXf03RaBC4E9F9yv9pQtQ6w2AmA64wcab4  
+Github Project Board: https://github.com/orgs/Revenge-of-the-Fit/projects/1/views/1  
+Github Issues: https://github.com/Revenge-of-the-Fit/RecommendationModel/issues  
