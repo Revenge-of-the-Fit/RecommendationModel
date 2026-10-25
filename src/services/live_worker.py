@@ -120,7 +120,9 @@ class LiveProfileWorker:
 
     def run_once(self, fetcher=None, *, user_id=None):
         with LiveStore(self.settings.storage_path) as live:
-            live.ingest(self.settings.live_source_id, self.settings.live_topic, limit=1000)
+            # Kafka already projects new events; replay old rows only in background batches.
+            if user_id is None:
+                live.ingest(self.settings.live_source_id, self.settings.live_topic, limit=1000)
             if not self.version_refreshed:
                 live.refresh_version(self.interpretation_version)
                 self.version_refreshed = True

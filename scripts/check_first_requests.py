@@ -16,13 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from models.settings import ServingSettings
 from recommender import EaseRecommender
 from storage.live import merge_history, read_live_user
+from storage.payloads import load_json
 
 
 def logged_record(connection, request_id):
     for _ in range(20):
         row = connection.execute("SELECT record_json FROM recommendation_requests WHERE request_id=?", (request_id,)).fetchone()
         if row:
-            return json.loads(row[0])
+            return load_json(row[0])
         time.sleep(0.05)
     return {}
 

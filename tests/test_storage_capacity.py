@@ -39,7 +39,7 @@ class StorageCapacityTests(unittest.TestCase):
         with patch.dict(os.environ, {"STORAGE_MAX_BYTES": str(maximum)}):
             with RequestStore(self.path) as store:
                 with self.assertRaises(sqlite3.DatabaseError):
-                    store.save_request({**self.record, "request_id": "oversized", "payload": "x" * 250000})
+                    store.save_request({**self.record, "request_id": "oversized", "payload": os.urandom(125000).hex()})
                 self.assertEqual(store.get_request("original"), original)
                 self.assertIsNone(store.get_request("oversized"))
                 self.assertEqual(store.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")

@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import test_live_users as fixtures
 from preferences import ColdStartError, normalize_description
+from storage.live import LiveStore
 
 
 class FirstRequestTests(unittest.TestCase):
@@ -49,6 +50,14 @@ class FirstRequestTests(unittest.TestCase):
             self.assertEqual((crime.method, comedy.method), ("llm_cold_start", "llm_cold_start"))
             self.assertNotEqual([r.movie_id for r in crime.recommendations], [r.movie_id for r in comedy.recommendations])
             self.assertEqual(create.call_count, 2)
+
+    def test_urgent_preparation_does_not_wait_for_historical_kafka_replay(self):
+        f = self.fixture
+        service = f.service()
+        worker = f.worker(service.cold_start)
+        with f.sdk(), patch.object(LiveStore, "ingest", side_effect=AssertionError("historical replay")):
+            worker.run_once(user_id=42)
+        self.assertEqual(service.recommend(42).method, "llm_cold_start")
 
     def test_slow_metadata_falls_back_and_concurrent_requests_share_one_paid_job(self):
         f = self.fixture

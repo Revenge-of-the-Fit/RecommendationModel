@@ -8,6 +8,7 @@ from pathlib import Path
 
 from storage.database import StorageError, open_database
 from storage.live import queue_user
+from storage.payloads import load_json, pack_json, unpack_json
 
 
 LOGGER = logging.getLogger(__name__)
@@ -70,13 +71,13 @@ class RequestStore:
                 INSERT INTO recommendation_requests(request_id, started_at, user_id, record_json)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(request_id) DO NOTHING
-            """, record)
+            """, (*record[:3], pack_json(record[3])))
             if cursor.rowcount == 0:
                 existing = self.connection.execute(
                     "SELECT record_json FROM recommendation_requests WHERE request_id = ?",
                     (record[0],),
                 ).fetchone()[0]
-                if existing != record[3]:
+                if unpack_json(existing) != record[3]:
                     raise StorageError("A request ID already exists with a different record")
             inserted = cursor.rowcount == 1
             if inserted:
@@ -88,7 +89,7 @@ class RequestStore:
             "SELECT record_json FROM recommendation_requests WHERE request_id = ?",
             (request_id,),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        return load_json(row[0]) if row else None
 
     def list_requests(self, user_id: int, limit: int = 100) -> list[dict]:
         if not 1 <= limit <= 10000:
@@ -97,7 +98,7 @@ class RequestStore:
             SELECT record_json FROM recommendation_requests WHERE user_id = ?
             ORDER BY started_at, request_id LIMIT ?
         """, (user_id, limit))
-        return [json.loads(row[0]) for row in rows]
+        return [load_json(row[0]) for row in rows]
 
     def close(self) -> None:
         self.connection.close()

@@ -10,10 +10,14 @@ import hashlib
 import json
 import re
 import sqlite3
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from storage.payloads import load_json
 
 
 def utc(value):
@@ -52,7 +56,7 @@ def summarize(connection, start, end, servers, catalog, match_seconds=5):
         SELECT request_id, user_id, started_at, record_json FROM recommendation_requests
         WHERE julianday(started_at) >= julianday(?) AND julianday(started_at) < julianday(?)
     """, ((start - padding).isoformat(), (end + padding).isoformat())):
-        record = json.loads(row["record_json"])
+        record = load_json(row["record_json"])
         if record.get("status") != 200 or not record.get("response_complete"):
             continue
         ids = tuple(item["movie_id"] for item in record.get("recommendations", []))

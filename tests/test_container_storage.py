@@ -59,7 +59,7 @@ class StorageMaintenanceTests(unittest.TestCase):
         status = {"healthy": False, "capacity_ok": False, "capacity_reasons": ["min_free_bytes"]}
         output = io.StringIO()
         errors = io.StringIO()
-        with patch.object(storage_maintenance, "storage_status", return_value=status), \
+        with patch.object(storage_maintenance, "capacity_status", return_value=status), \
                 patch.object(storage_maintenance, "backup_database") as backup, \
                 redirect_stdout(output), redirect_stderr(errors):
             self.assertEqual(storage_maintenance.main(self.arguments("--once")), 1)
@@ -69,7 +69,7 @@ class StorageMaintenanceTests(unittest.TestCase):
 
     def test_backup_failure_is_visible_without_printing_exception_payload(self):
         errors = io.StringIO()
-        with patch.object(storage_maintenance, "storage_status", return_value={"healthy": True}), \
+        with patch.object(storage_maintenance, "capacity_status", return_value={"healthy": True}), \
                 patch.object(storage_maintenance, "backup_database", side_effect=OSError("secret-sentinel")), \
                 redirect_stdout(io.StringIO()), redirect_stderr(errors):
             self.assertEqual(storage_maintenance.main(self.arguments("--once")), 1)
@@ -79,13 +79,13 @@ class StorageMaintenanceTests(unittest.TestCase):
     def test_waiting_for_next_backup_is_interrupted_by_shutdown(self):
         stopped = Mock(spec=threading.Event)
         stopped.is_set.side_effect = [False, True]
-        with patch.object(storage_maintenance, "storage_status", return_value={"healthy": True}), \
+        with patch.object(storage_maintenance, "capacity_status", return_value={"healthy": True}), \
                 patch.object(storage_maintenance, "backup_database", return_value={"archive_name": "backup.gz"}), \
                 redirect_stdout(io.StringIO()):
             self.assertEqual(storage_maintenance.run_maintenance(
                 self.path, self.archives, interval_hours=6, stop_event=stopped,
             ), 1)
-        stopped.wait.assert_called_once_with(21600)
+        stopped.wait.assert_called_once_with(60)
 
     def test_environment_sets_retention_and_capacity_plan(self):
         environment = {

@@ -144,3 +144,46 @@ docker compose down
 
 `docker compose down` keeps the named volumes. Do not add `--volumes` unless the stored state
 should be deleted.
+
+## Storage format and recovery
+
+Schema 7 stores large request-log and metadata-fetch JSON as tagged zlib BLOBs.
+Small records remain TEXT. Readers support both forms; JSONL/evaluation exports
+decode them back to the original JSON. Kafka events, timestamps, user/movie IDs,
+ratings, metadata snapshots, profile provenance, LLM usage, and live summaries are
+preserved. Rebuild API, Kafka, and storage-maintenance together for this change:
+schema-6 code cannot read the new compressed records. SQL scripts that read these
+two `record_json` columns must use `storage.payloads.load_json` instead of
+`json.loads`. SQL JSON functions cannot operate directly on compressed BLOBs.
+
+To convert the existing history, first build all three images while serving
+continues. Then stop all three services. With them stopped, run the new API image:
+
+```bash
+docker compose --project-name recommendationmodel run --rm --no-deps --user 0 \
+  --entrypoint python -T api src/compact_storage.py --offline \
+  --output /app/state/events/events.compact.sqlite3
+```
+
+This builds a new densely packed database, verifies integrity, foreign keys and
+every table's row count, and prints progress plus a final size report. It leaves
+the original in place. It requires free space for twice the logical database
+size plus 8 GiB, conservatively allowing index construction. Interruptions leave
+the original usable. After successful verification, with writers still stopped,
+checkpoint the original and retain it under a rollback filename before installing
+the compact copy. Preserve its ownership. Never discard an uncheckpointed WAL.
+Do not start schema-6 containers against the compact database.
+
+Maintenance checks capacity/checkpoints every 60 seconds. Backup no longer runs
+integrity scans against the live database or holds its source transaction while
+validating/compressing the copy. Verification runs on the isolated copy; incremental
+copying has a ten-minute time budget. A failed backup preserves previous archives
+and is retried later. Compose defaults to two verified backups within 24 GiB.
+
+Before write transactions, persistent writers check an 8 GiB free-space reserve
+and a 4 GiB WAL limit. A blocked reader can therefore pause ingestion/logging
+before exhausting the disk; serving existing recommendations can continue.
+Maintenance can checkpoint the WAL after the reader closes. `STORAGE_MAX_BYTES`
+still limits main-database pages (96 GiB in Compose). These guards and compression
+do not provide indefinite history storage: they make growth smaller and bounded
+failures visible. No training or evaluation history is automatically expired.
