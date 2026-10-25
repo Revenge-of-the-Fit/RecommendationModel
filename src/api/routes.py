@@ -46,7 +46,7 @@ def recommend(
 ) -> PlainTextResponse:
     request.state.user_id = userid
     try:
-        result = service.recommend(userid)
+        result = service.recommend(userid, deadline=getattr(request.state, "recommendation_deadline", None))
     except (ValidationError, ValueError, OSError) as error:
         request.state.error_type = type(error).__name__
         LOGGER.error("Could not serve request %s (%s)", request.state.request_id, type(error).__name__)

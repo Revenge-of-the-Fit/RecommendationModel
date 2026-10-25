@@ -46,7 +46,7 @@ class StorageCapacityTests(unittest.TestCase):
 
     def test_capacity_failure_is_visible_while_recommendations_keep_serving(self):
         settings = ServingSettings(storage_path=self.path, storage_max_bytes=1, storage_min_free_bytes=0)
-        service = SimpleNamespace(versions={}, recommend=lambda user_id: RecommendationResult(
+        service = SimpleNamespace(versions={}, recommend=lambda user_id, **_: RecommendationResult(
             user_id=user_id, method="popularity",
             recommendations=[{"movie_id": "movie_a", "title": "Movie A", "score": 1}],
         ))

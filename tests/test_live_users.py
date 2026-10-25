@@ -109,7 +109,7 @@ class LiveUserTests(unittest.TestCase):
         return MetadataBatch(200, records={value: copy.deepcopy(self.records[value]) for value in ids if value in self.records}, response={"body": [copy.deepcopy(self.records[value]) for value in ids if value in self.records], "headers": [["content-type", "application/json"]]})
 
     def provider_response(self, request, response_id="provider-response"):
-        descriptions = json.loads(request["input"])
+        descriptions = json.loads(request["input"][-1]["content"])
         comedy = "comedy" in descriptions["likes"].lower()
         profile = {
             "liked_genres": ["Comedy"] if comedy else ["Crime", "Drama"],
@@ -121,7 +121,10 @@ class LiveUserTests(unittest.TestCase):
         usage = {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
         envelope = {
             "id": response_id, "model": "provider-model-snapshot", "status": "completed",
-            "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
+            "answers": [{"type": "choice", "name": q["name"], "choice":
+                         "avoid" if q["name"] in profile["excluded_genres"] else
+                         "like" if q["name"] in profile["liked_genres"] else "none"}
+                        for q in request["questions"]],
             "usage": usage, "provider_extension": {"nullable": None},
         }
         return ProviderResponse(id=response_id, model=envelope["model"], status="completed", output_text=text, usage=SimpleNamespace(model_dump=lambda **_: copy.deepcopy(usage)), envelope=envelope)
@@ -130,7 +133,7 @@ class LiveUserTests(unittest.TestCase):
     def sdk(self, callback=None):
         client = MagicMock()
         client.__enter__.return_value = client
-        create = client.responses.create
+        create = client.decisions.create
         create.side_effect = callback or (lambda **request: self.provider_response(request, f"provider-response-{create.call_count}"))
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-provider-key"}):
             with patch("preferences.dotenv_values", return_value={}):

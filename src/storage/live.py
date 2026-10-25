@@ -123,16 +123,22 @@ class LiveStore:
             processed += len(rows)
         return processed
 
-    def due_users(self, now=None, limit=200, interpretation_version=None):
+    def due_users(self, now=None, limit=200, interpretation_version=None, user_id=None):
+        selected = " AND u.user_id=?" if user_id is not None else ""
+        parameters = [time.time() if now is None else now]
+        if user_id is not None:
+            parameters.append(user_id)
+        parameters.append(limit)
         rows = self.connection.execute("""
             SELECT u.* FROM live_users u WHERE u.next_attempt_at<=?
+        """ + selected + """
             ORDER BY u.priority,
                 CASE WHEN u.priority<2 THEN (
                     SELECT r.started_at FROM recommendation_requests r WHERE r.user_id=u.user_id
                     ORDER BY r.started_at DESC, r.request_id DESC LIMIT 1
                 ) END DESC,
                 u.next_attempt_at, u.user_id LIMIT ?
-        """, (time.time() if now is None else now, limit))
+        """, parameters)
         jobs = [dict(row) for row in rows]
         if interpretation_version is not None:
             with self.connection:

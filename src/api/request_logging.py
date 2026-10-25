@@ -112,6 +112,7 @@ class RequestLoggingMiddleware:
         state["request_id"] = request_id
         started_at = datetime.now(timezone.utc).isoformat()
         started = time.perf_counter()
+        state["recommendation_deadline"] = time.monotonic() + self.state.settings.recommendation_budget_seconds
         status = None
         body = bytearray()
         body_truncated = False
@@ -184,6 +185,8 @@ class RequestLoggingMiddleware:
                     "serving_method": result.method if successful else None,
                     "fallback_reason": result.fallback_reason if successful else None,
                     "cached": result.cached if successful else None,
+                    "preparation_attempted": result.preparation_attempted if successful else None,
+                    "preparation_wait_ms": result.preparation_wait_ms if successful else None,
                     "llm_model": result.llm_model if successful else None,
                     "profile_reference": {
                         "profile_id": result.profile_id, "attempt_id": result.llm_attempt_id,

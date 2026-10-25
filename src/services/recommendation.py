@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+import time
 
 from cold_start import ColdStartRecommender
 from dataset import MovieDataset
@@ -71,7 +72,10 @@ class RecommendationService:
             return self.live_worker.close()
         return True
 
-    def recommend(self, user_id: int) -> RecommendationResult:
+    def recommend(self, user_id: int, *, deadline=None) -> RecommendationResult:
+        started = time.monotonic()
+        budget = self.settings.recommendation_budget_seconds if self.settings is not None else 0.5
+        deadline = min(deadline if deadline is not None else started + budget, started + budget)
         if self.settings is not None and self.settings.live_enabled:
             try:
                 history = read_live_user(self.settings.storage_path, user_id,
@@ -79,6 +83,30 @@ class RecommendationService:
             except (sqlite3.Error, OSError, ValueError) as error:
                 LOGGER.error("Live state unavailable (%s)", type(error).__name__)
             else:
+                supported, _ = merge_history(self.model, user_id, history)
+                prepared = history["prepared"]
+                if (not supported and prepared is None and self.live_worker is not None):
+                    fallback = self._recommend_live(user_id, history)
+                    if fallback.method == "llm_cold_start":
+                        return fallback
+                    wait = max(0, min(
+                        started + self.settings.cold_start_wait_seconds,
+                        deadline - 0.05,
+                    ) - time.monotonic())
+                    waiting = time.monotonic()
+                    completed = self.live_worker.prepare(user_id, wait)
+                    waited_ms = (time.monotonic() - waiting) * 1000
+                    if completed and time.monotonic() < deadline - 0.01:
+                        try:
+                            history = read_live_user(self.settings.storage_path, user_id,
+                                                     self.settings.live_source_id, self.settings.live_topic)
+                        except (sqlite3.Error, OSError, ValueError):
+                            pass
+                    result = self._recommend_live(user_id, history) if completed else fallback
+                    return result.model_copy(update={
+                        "preparation_attempted": wait > 0,
+                        "preparation_wait_ms": waited_ms,
+                    })
                 return self._recommend_live(user_id, history)
         try:
             result = recommend_for_user(

@@ -1,6 +1,7 @@
 import logging
 import json
 import threading
+import queue
 from contextlib import nullcontext
 from datetime import datetime, timezone
 
@@ -43,6 +44,10 @@ class LiveProfileWorker:
             "schema": self.interpreter._response_schema(),
         })
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
+        self.urgent = queue.Queue(maxsize=settings.profile_queue_size)
+        self.pending = {}
+        self.pending_lock = threading.Lock()
         self.thread = None
         self.version_refreshed = False
 
@@ -60,17 +65,51 @@ class LiveProfileWorker:
 
     def close(self, timeout=5.0):
         self.stop_event.set()
+        self.wake_event.set()
+        with self.pending_lock:
+            for event in self.pending.values():
+                event.set()
         if self.thread is not None:
             self.thread.join(timeout)
         return self.thread is None or not self.thread.is_alive()
 
+    def prepare(self, user_id, timeout):
+        """Share a queued job; the HTTP caller never performs metadata or LLM I/O."""
+        if timeout <= 0 or self.stop_event.is_set() or self.thread is None:
+            return False
+        with self.pending_lock:
+            event = self.pending.get(user_id)
+            if event is None:
+                event = threading.Event()
+                try:
+                    self.urgent.put_nowait(user_id)
+                except queue.Full:
+                    return False
+                self.pending[user_id] = event
+            self.wake_event.set()
+        return event.wait(timeout)
+
     def _run(self):
         while not self.stop_event.is_set():
             try:
-                self.run_once()
+                user_id = self.urgent.get_nowait()
+            except queue.Empty:
+                user_id = None
+            try:
+                if user_id is None:
+                    self.run_once()
+                else:
+                    self.run_once(user_id=user_id)
             except Exception as error:
                 LOGGER.error("Live profile worker iteration failed (%s)", type(error).__name__)
-            self.stop_event.wait(self.poll_seconds)
+            finally:
+                if user_id is not None:
+                    with self.pending_lock:
+                        self.pending.pop(user_id).set()
+                    self.urgent.task_done()
+            if self.urgent.empty():
+                self.wake_event.wait(self.poll_seconds)
+                self.wake_event.clear()
 
     def _fail(self, store, user_id, category, transient):
         store.fail(
@@ -79,14 +118,17 @@ class LiveProfileWorker:
         )
         LOGGER.warning("Live profile preparation failed (%s)", category)
 
-    def run_once(self, fetcher=None):
+    def run_once(self, fetcher=None, *, user_id=None):
         with LiveStore(self.settings.storage_path) as live:
             live.ingest(self.settings.live_source_id, self.settings.live_topic, limit=1000)
             if not self.version_refreshed:
                 live.refresh_version(self.interpretation_version)
                 self.version_refreshed = True
+            if user_id is not None:
+                live.enqueue(user_id)
             pending = live.due_users(
                 self._now().timestamp(), limit=200, interpretation_version=self.interpretation_version,
+                user_id=user_id,
             )
             if not pending or self.stop_event.is_set():
                 return
@@ -118,7 +160,7 @@ class LiveProfileWorker:
                         )
                 profile_calls = 0
                 for job in pending:
-                    if self.stop_event.is_set() or profile_calls >= 5:
+                    if self.stop_event.is_set() or profile_calls >= 5 or (profile_calls and not self.urgent.empty()):
                         break
                     user_id = job["user_id"]
                     snapshot = collection.snapshots.get(str(user_id))
@@ -142,12 +184,14 @@ class LiveProfileWorker:
                                 self.settings.live_source_id, self.settings.live_topic,
                             )
                             positive, _ = merge_history(self.model, user_id, history) if self.model is not None else (set(), set())
-                            if not positive or previous.get("profile") is not None:
+                            if not positive:
                                 profile_calls += 1
                                 profile, _ = self.interpreter.get_profile_record(
                                     likes, dislikes, offline=False,
                                     context={"user_id": user_id, "source_snapshot_id": snapshot["snapshot_id"]},
                                 )
+                            else:
+                                profile = previous.get("profile")
                         live.complete(user_id, {
                             "snapshot_id": snapshot["snapshot_id"],
                             "metadata_version": snapshot["content_version"],

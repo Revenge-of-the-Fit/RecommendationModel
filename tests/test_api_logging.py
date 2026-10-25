@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from uuid import UUID
 
 
@@ -86,7 +86,7 @@ class ApiRequestLoggingTests(unittest.TestCase):
                 self.assertNotEqual(response.headers["x-request-id"], "caller-request-id")
                 UUID(response.headers["x-request-id"])
         record = self.read_request(response)
-        self.service.recommend.assert_called_once_with(42)
+        self.service.recommend.assert_called_once_with(42, deadline=ANY)
         self.assertEqual(record["request_id"], response.headers["x-request-id"])
         self.assertEqual(record["user_id"], 42)
         self.assertEqual(record["path"], "/recommend/42")
@@ -358,6 +358,7 @@ class ResponseHandoffTests(unittest.IsolatedAsyncioTestCase):
     async def run_response(self, fail_send=False, fail_after_response=False):
         records = []
         application_state = SimpleNamespace(
+            settings=ServingSettings(),
             request_log=SimpleNamespace(submit=lambda record: records.append(record)),
             code_version="code-1", request_log_capture_failed=0,
             request_log_unavailable=0, request_log_error=None,

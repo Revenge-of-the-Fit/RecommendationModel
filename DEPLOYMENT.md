@@ -1,5 +1,42 @@
 # Deployment
 
+## Decisions cold start (issue #21)
+
+The API uses OpenAI SDK 3.26.0 and `POST /v1/decisions` with `gpt-6-luna`.
+Keep `OPENAI_API_KEY` in the existing private environment configuration.
+Only genre questions relevant to the descriptions are sent; named-film/implicit
+preferences use two genre-choice questions. Original description text drives the
+local text ranker. No catalog or generated summaries are sent/required.
+
+Profiles are cached by normalized descriptions, prompt, model, and interpretation
+schema. Descriptions are whitespace-normalized and capped at 2,000 characters per
+field. Existing prepared profiles remain usable while the new version refreshes.
+Users with supported positive history and users without descriptions need no LLM call.
+
+Signup events continue to queue preparation. An unprepared cold request wakes the
+same single background worker and shares any existing job for that user. It waits
+at most `COLD_START_WAIT_SECONDS` (default 0.4), within
+`RECOMMENDATION_BUDGET_SECONDS` (default 0.5 from HTTP arrival). On timeout or failure
+it returns the existing fallback; background work may finish for the next request.
+`PROFILE_QUEUE_SIZE` defaults to 1024. Provider/metadata retries remain outside HTTP
+waiting. Cached profiles and exclusions are reused immediately.
+
+After uploading a reviewed revision, rebuild only the API with
+`docker compose --project-name recommendationmodel up -d --build --no-deps api`.
+This avoids rerunning fixed-M0 provisioning and preserves the named volumes.
+Check readiness and run the two commands below inside the API container:
+
+```bash
+python scripts/benchmark_decisions.py --output /app/state/events/issue21-decisions.json
+python scripts/check_first_requests.py --count 10 --output /app/state/events/issue21-first-requests.json
+```
+
+The first command makes 14 small paid calls using synthetic descriptions; the second
+probes existing unprepared production users and reports first/later responses from
+the request log. Its localhost timings exclude the course-to-VM network delay.
+The benchmark reports token usage and latency; the HTTP check reports first/later
+response timing, personalization, and fallbacks. Save generated reports outside Git.
+
 Docker Compose provisions the verified catalog and model, then runs the API on port `8082`.
 Named volumes preserve the model, catalog, cold-start cache, event logs, live profiles, and worker state.
 
