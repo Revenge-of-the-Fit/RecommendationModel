@@ -177,7 +177,8 @@ Do not start schema-6 containers against the compact database.
 Maintenance checks capacity/checkpoints every 60 seconds. Backup no longer runs
 integrity scans against the live database or holds its source transaction while
 validating/compressing the copy. Verification runs on the isolated copy; incremental
-copying has a ten-minute time budget. A failed backup preserves previous archives
+copying holds a fixed read snapshot so concurrent writes do not restart it, with
+a ten-minute time budget. A failed backup preserves previous archives
 and is retried later. Compose defaults to two verified backups within 24 GiB.
 
 Before write transactions, persistent writers check an 8 GiB free-space reserve

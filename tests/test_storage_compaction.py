@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import closing, redirect_stdout
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import compact_storage
 import storage_maintenance
+import storage.operations as operations
 from events.parser import parse_event
 from storage.database import StorageError
 from storage.events import EventStore, KafkaEnvelope
@@ -159,3 +161,45 @@ class StorageCompactionTests(unittest.TestCase):
         with patch("storage.operations.time.monotonic", side_effect=[0, 601]), self.assertRaises(StorageError):
             backup_database(self.path, archives)
         self.assertEqual(set(archives.iterdir()), before)
+
+    def test_backup_finishes_with_writes_each_step_and_releases_snapshot_before_verification(self):
+        # Force many steps without a production-sized database or timing dependence.
+        with closing(sqlite3.connect(self.path)) as writer:
+            writer.execute("CREATE TABLE backup_test (id INTEGER PRIMARY KEY, payload BLOB)")
+            writer.executemany("INSERT INTO backup_test VALUES (?, ?)", [(i, os.urandom(4096)) for i in range(80)])
+            writer.commit()
+        read_database, report = operations._read_database, operations._report
+        callbacks = []
+
+        class CopySource:
+            def __init__(proxy, connection):
+                proxy.connection = connection
+
+            def execute(proxy, *args):
+                return proxy.connection.execute(*args)
+
+            def backup(proxy, destination, *, pages, sleep, progress):
+                def after_step(status, remaining, total):
+                    callbacks.append(remaining)
+                    if len(callbacks) > 100:
+                        raise AssertionError("Backup keeps restarting under concurrent writes")
+                    with closing(sqlite3.connect(self.path)) as writer:
+                        writer.execute("UPDATE backup_test SET payload=? WHERE id=0", (os.urandom(4096),))
+                        writer.commit()
+                    progress(status, remaining, total)
+                proxy.connection.backup(destination, pages=4, sleep=sleep, progress=after_step)
+
+        @contextmanager
+        def source(path):
+            with read_database(path) as connection:
+                yield CopySource(connection)
+
+        def verify(connection):
+            self.assertFalse(checkpoint_database(self.path)["busy"], "Backup still pins the live WAL during verification")
+            return report(connection)
+
+        with patch.object(operations, "_read_database", source), patch.object(operations, "_report", verify):
+            result = backup_database(self.path, self.directory / "archives")
+        self.assertGreater(len(callbacks), 5)
+        self.assertEqual(callbacks[-1], 0)
+        self.assertTrue(Path(result["archive_path"]).is_file())

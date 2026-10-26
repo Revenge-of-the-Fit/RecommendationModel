@@ -301,6 +301,9 @@ def backup_database(path, archive_directory, *, retain=7, min_free_bytes=0, max_
         directory.mkdir(parents=True, exist_ok=True)
         archive_lock = _acquire_archive_lock(directory)
         with _read_database(path) as source:
+            # A fixed snapshot prevents each concurrent commit restarting a large copy.
+            # Release it immediately after the bounded copy, before validation/compression.
+            source.execute("BEGIN")
             size = source.execute("PRAGMA page_count").fetchone()[0] * source.execute("PRAGMA page_size").fetchone()[0]
             if _free_space(directory) < min_free_bytes + size * 2 + CHUNK_BYTES:
                 raise StorageError("Insufficient free space for a verified backup")
