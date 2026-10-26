@@ -316,6 +316,7 @@ def backup_database(path, archive_directory, *, retain=7, min_free_bytes=0, max_
                         raise StorageError("Backup time budget exceeded; previous archives retained")
                 source.backup(target, pages=1024, sleep=0.01, progress=progress)
         # Release the source before checking/compressing its copy.
+        checkpoint_database(path)
         with closing(sqlite3.connect(snapshot)) as target:
             target.execute("PRAGMA journal_mode=DELETE")
             report = _report(target)

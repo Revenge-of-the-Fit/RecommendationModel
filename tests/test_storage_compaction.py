@@ -195,10 +195,14 @@ class StorageCompactionTests(unittest.TestCase):
                 yield CopySource(connection)
 
         def verify(connection):
+            wal = Path(str(self.path) + "-wal")
+            self.assertTrue(not wal.exists() or wal.stat().st_size == 0,
+                            "Clear the live WAL before slow verification so paused writers can resume")
             self.assertFalse(checkpoint_database(self.path)["busy"], "Backup still pins the live WAL during verification")
             return report(connection)
 
-        with patch.object(operations, "_read_database", source), patch.object(operations, "_report", verify):
+        with closing(sqlite3.connect(self.path)), patch.object(operations, "_read_database", source), \
+                patch.object(operations, "_report", verify):
             result = backup_database(self.path, self.directory / "archives")
         self.assertGreater(len(callbacks), 5)
         self.assertEqual(callbacks[-1], 0)
