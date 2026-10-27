@@ -39,14 +39,14 @@ class StorageCapacityTests(unittest.TestCase):
         with patch.dict(os.environ, {"STORAGE_MAX_BYTES": str(maximum)}):
             with RequestStore(self.path) as store:
                 with self.assertRaises(sqlite3.DatabaseError):
-                    store.save_request({**self.record, "request_id": "oversized", "payload": "x" * 250000})
+                    store.save_request({**self.record, "request_id": "oversized", "payload": os.urandom(125000).hex()})
                 self.assertEqual(store.get_request("original"), original)
                 self.assertIsNone(store.get_request("oversized"))
                 self.assertEqual(store.connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
 
     def test_capacity_failure_is_visible_while_recommendations_keep_serving(self):
         settings = ServingSettings(storage_path=self.path, storage_max_bytes=1, storage_min_free_bytes=0)
-        service = SimpleNamespace(versions={}, recommend=lambda user_id: RecommendationResult(
+        service = SimpleNamespace(versions={}, recommend=lambda user_id, **_: RecommendationResult(
             user_id=user_id, method="popularity",
             recommendations=[{"movie_id": "movie_a", "title": "Movie A", "score": 1}],
         ))

@@ -169,26 +169,27 @@ class ColdStartTests(unittest.TestCase):
         self.assertGreater(scores[4], scores[2])
         self.assertGreater(scores[4], 0)
 
-    def test_api_request_uses_luna_with_a_small_payload(self):
-        response = SimpleNamespace(
-            status="completed", output_text=json.dumps(self.profile),
-            model=LLM_MODEL, id="test-response", usage=None,
-        )
-        with patch.dict("os.environ", {}, clear=True):
-            with patch("preferences.dotenv_values", return_value={"OPENAI_TOKEN": "test-token"}):
-                with patch("preferences.OpenAI") as client_class:
-                    client = client_class.return_value.__enter__.return_value
-                    client.responses.create.return_value = response
-                    result = self.interpreter._request("preferences", self.interpreter._response_schema())
-
-        arguments = client.responses.create.call_args.kwargs
-        self.assertEqual(arguments["model"], "gpt-6-luna")
-        self.assertEqual(arguments["reasoning"], {"effort": "none"})
-        self.assertFalse(arguments["store"])
-        self.assertTrue(arguments["text"]["format"]["strict"])
-        self.assertLess(len(arguments["instructions"]), 2000)
-        self.assertEqual(result["profile"], self.profile)
-        self.assertEqual(client_class.call_args.kwargs["base_url"], "https://api.openai.com/v1")
+    def test_api_request_uses_decisions_with_compact_questions(self):
+        answers = [{"type": "choice", "name": genre, "choice":
+                    "like" if genre in self.profile["liked_genres"] else
+                    "avoid" if genre in self.profile["excluded_genres"] else "none"}
+                   for genre in ["Crime", "Drama", "Horror"]]
+        response = SimpleNamespace(model=LLM_MODEL, usage=None,
+                                   model_dump=lambda **_: {"model": LLM_MODEL, "answers": answers})
+        with patch.dict("os.environ", {}, clear=True), patch("preferences.dotenv_values", return_value={"OPENAI_TOKEN": "test-token"}):
+            with patch("preferences.OpenAI") as client_class:
+                client = client_class.return_value.__enter__.return_value
+                client.decisions.create.return_value = response
+                result = self.interpreter._request(json.dumps({"likes": "Crime dramas", "dislikes": "Horror"}), {})
+        arguments = client.decisions.create.call_args.kwargs
+        self.assertEqual(arguments["model"], LLM_MODEL)
+        self.assertEqual(set(arguments), {"model", "input", "questions"})
+        self.assertEqual([q["name"] for q in arguments["questions"]], ["Crime", "Drama", "Horror"])
+        self.assertEqual(result["profile"]["liked_genres"], ["Crime", "Drama"])
+        self.assertEqual(result["profile"]["likes_summary"], "Crime dramas")
+        self.assertEqual(result["profile"]["liked_titles"], [])
+        self.assertIsNone(result["response_id"])
+        self.assertEqual(client_class.call_args.kwargs["max_retries"], 0)
 
     def test_missing_key_has_a_clear_error(self):
         with patch.dict("os.environ", {}, clear=True):

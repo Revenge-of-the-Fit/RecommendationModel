@@ -7,6 +7,7 @@ from pathlib import Path
 
 from storage.database import StorageError, open_database
 from storage.source_redaction import redact_headers, redact_source_fields
+from storage.payloads import load_json, pack_json
 
 
 def normalize_entity_id(entity_type: str, value) -> str:
@@ -161,7 +162,7 @@ class MetadataStore:
                 ON CONFLICT(fetch_id) DO NOTHING
             """, (
                 fetch["fetch_id"], fetch["source_id"], fetch["entity_type"],
-                fetch["started_at"], fetch["finished_at"], fetch["status"], fingerprint, _json(fetch),
+                fetch["started_at"], fetch["finished_at"], fetch["status"], fingerprint, pack_json(_json(fetch)),
             ))
             if cursor.rowcount == 0:
                 existing = self.connection.execute(
@@ -192,7 +193,7 @@ class MetadataStore:
         row = self.connection.execute(
             "SELECT record_json FROM metadata_fetches WHERE fetch_id=?", (fetch_id,),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        return load_json(row[0]) if row else None
 
     def get_snapshot(self, snapshot_id: str) -> dict | None:
         row = self.connection.execute(

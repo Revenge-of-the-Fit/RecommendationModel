@@ -1,5 +1,42 @@
 # Deployment
 
+## Decisions cold start (issue #21)
+
+The API uses OpenAI SDK 3.26.0 and `POST /v1/decisions` with `gpt-6-luna`.
+Keep `OPENAI_API_KEY` in the existing private environment configuration.
+Only genre questions relevant to the descriptions are sent; named-film/implicit
+preferences use two genre-choice questions. Original description text drives the
+local text ranker. No catalog or generated summaries are sent/required.
+
+Profiles are cached by normalized descriptions, prompt, model, and interpretation
+schema. Descriptions are whitespace-normalized and capped at 2,000 characters per
+field. Existing prepared profiles remain usable while the new version refreshes.
+Users with supported positive history and users without descriptions need no LLM call.
+
+Signup events continue to queue preparation. An unprepared cold request wakes the
+same single background worker and shares any existing job for that user. It waits
+at most `COLD_START_WAIT_SECONDS` (default 0.4), within
+`RECOMMENDATION_BUDGET_SECONDS` (default 0.5 from HTTP arrival). On timeout or failure
+it returns the existing fallback; background work may finish for the next request.
+`PROFILE_QUEUE_SIZE` defaults to 1024. Provider/metadata retries remain outside HTTP
+waiting. Cached profiles and exclusions are reused immediately.
+
+After uploading a reviewed revision, rebuild only the API with
+`docker compose --project-name recommendationmodel up -d --build --no-deps api`.
+This avoids rerunning fixed-M0 provisioning and preserves the named volumes.
+Check readiness and run the two commands below inside the API container:
+
+```bash
+python scripts/benchmark_decisions.py --output /app/state/events/issue21-decisions.json
+python scripts/check_first_requests.py --count 10 --output /app/state/events/issue21-first-requests.json
+```
+
+The first command makes 14 small paid calls using synthetic descriptions; the second
+probes existing unprepared production users and reports first/later responses from
+the request log. Its localhost timings exclude the course-to-VM network delay.
+The benchmark reports token usage and latency; the HTTP check reports first/later
+response timing, personalization, and fallbacks. Save generated reports outside Git.
+
 Docker Compose provisions the verified catalog and model, then runs the API on port `8082`.
 Named volumes preserve the model, catalog, cold-start cache, event logs, live profiles, and worker state.
 
@@ -107,3 +144,60 @@ docker compose down
 
 `docker compose down` keeps the named volumes. Do not add `--volumes` unless the stored state
 should be deleted.
+
+## Storage format and recovery
+
+Schema 7 stores large request-log and metadata-fetch JSON as tagged zlib BLOBs.
+Small records remain TEXT. Readers support both forms; JSONL/evaluation exports
+decode them back to the original JSON. Kafka events, timestamps, user/movie IDs,
+ratings, metadata snapshots, profile provenance, LLM usage, and live summaries are
+preserved. Rebuild API, Kafka, and storage-maintenance together for this change:
+schema-6 code cannot read the new compressed records. SQL scripts that read these
+two `record_json` columns must use `storage.payloads.load_json` instead of
+`json.loads`. SQL JSON functions cannot operate directly on compressed BLOBs.
+
+To convert the existing history, first build all three images while serving
+continues. Then stop all three services. With them stopped, run the new API image:
+
+```bash
+docker compose --project-name recommendationmodel run --rm --no-deps --user 0 \
+  --entrypoint python -T api src/compact_storage.py --offline \
+  --output /app/state/events/events.compact.sqlite3
+```
+
+This builds a new densely packed database, verifies integrity, foreign keys and
+every table's row count, and prints progress plus a final size report. It leaves
+the original in place. It requires free space for twice the logical database
+size plus 8 GiB, conservatively allowing index construction. Interruptions leave
+the original usable. After successful verification, with writers still stopped,
+checkpoint the original and retain it under a rollback filename before installing
+the compact copy. Preserve its ownership. Never discard an uncheckpointed WAL.
+Do not start schema-6 containers against the compact database.
+
+Maintenance checks capacity/checkpoints every 60 seconds between backups.
+Backup no longer runs
+integrity scans against the live database or holds its source transaction while
+validating/compressing the copy. Verification runs on the isolated copy; incremental
+copying holds a fixed read snapshot so concurrent writes do not restart it, with
+a ten-minute time budget. A failed backup preserves previous archives
+and is retried later. Compose defaults to two verified backups within 24 GiB.
+Verification and compression of a large isolated copy can take much longer than
+the ten-minute live-copy budget. Inspect `storage_backup` log entries for the
+result; temporary `.observations-*` files belong to the active backup. Retain the
+pre-conversion database until a fresh backup has succeeded, then remove that
+redundant copy to restore headroom for future backups.
+
+Our VM's private `.env` sets `STORAGE_BUSY_TIMEOUT=5` for Kafka ingestion and
+request-log writes. HTTP preparation waiting uses the separate budgets above.
+
+Before write transactions, persistent writers check an 8 GiB free-space reserve
+and a 4 GiB WAL limit. A blocked reader can therefore pause ingestion/logging
+before exhausting the disk; serving existing recommendations can continue.
+Maintenance can checkpoint the WAL after the reader closes. `STORAGE_MAX_BYTES`
+still limits main-database pages (96 GiB in Compose). These guards and compression
+do not provide indefinite history storage: they make growth smaller and bounded
+failures visible. No training or evaluation history is automatically expired.
+
+The October 25 deployment checks captured 457/457 successful course responses
+within 600 ms. A fresh schema-7 backup passed integrity and compression checks;
+removing the redundant original database left 145 GiB free (38% disk usage).

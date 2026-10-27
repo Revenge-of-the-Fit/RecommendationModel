@@ -28,6 +28,9 @@ class ServingSettings(BaseModel):
     live_topic: str = "movielog2"
     metadata_base_url: str = "http://128.2.24.239:8080"
     profile_refresh_seconds: float = Field(default=86400, gt=0, allow_inf_nan=False)
+    cold_start_wait_seconds: float = Field(default=0.4, ge=0, le=0.4, allow_inf_nan=False)
+    recommendation_budget_seconds: float = Field(default=0.5, gt=0, le=0.5, allow_inf_nan=False)
+    profile_queue_size: int = Field(default=1024, gt=0)
 
     @classmethod
     def from_environment(cls) -> "ServingSettings":

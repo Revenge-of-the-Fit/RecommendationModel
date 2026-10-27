@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 from openai import APIStatusError
-from openai.types.responses import Response
+from openai.types.decision import Decision
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -39,9 +39,9 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.interpreter = self.new_interpreter()
         self.profile = {
             "liked_genres": ["Crime", "Drama"], "excluded_genres": ["Horror"],
-            "liked_titles": ["Movie A"], "disliked_titles": [],
-            "likes_summary": "Detective investigations and crime dramas.",
-            "dislikes_summary": "Horror.",
+            "liked_titles": [], "disliked_titles": [],
+            "likes_summary": "Crime dramas",
+            "dislikes_summary": "Horror",
         }
 
     def tearDown(self):
@@ -53,36 +53,38 @@ class ProfileProvenanceTests(unittest.TestCase):
             self.directory / "unused.env", storage_path=self.database,
         )
 
-    def response(self, *, status="completed", output_text=None, profile=None, **extension):
-        text = json.dumps(profile or self.profile) if output_text is None else output_text
-        usage = {
-            "input_tokens": 17, "output_tokens": 23, "total_tokens": 40,
-            "input_tokens_details": {"cached_tokens": 0},
-            "output_tokens_details": {"reasoning_tokens": 4},
-        }
-        envelope = {
-            "id": "response-real-1", "model": "returned-model-snapshot", "status": status,
-            "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
-            "usage": usage, "error": None, "incomplete_details": None,
-            "provider_extension": {"nullable": None, "enabled": False, "nested": [{"unknown": [1, 2]}]},
-            **extension,
-        }
-        return ProviderResponse(
-            id=envelope["id"], model=envelope["model"], status=status, output_text=text,
-            usage=SimpleNamespace(model_dump=lambda **_: copy.deepcopy(usage)),
-            envelope=envelope,
-        )
+    def response(self, *, status="completed", output_text=None, profile=None, genres=None, **extension):
+        profile = profile or self.profile
+        names = genres if genres is not None else sorted(set(self.interpreter.genres) | set(profile["liked_genres"]) | set(profile["excluded_genres"]))
+        answers = [{"type": "choice", "name": genre, "choice":
+                    "avoid" if genre in profile["excluded_genres"] else
+                    "like" if genre in profile["liked_genres"] else "none"} for genre in names]
+        if status != "completed" or output_text == "":
+            answers = [{"type": "refusal", "name": names[0]}]
+        elif output_text is not None:
+            answers = "malformed"
+        usage = {"input_tokens": 17, "output_tokens": 0, "total_tokens": 17,
+                 "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0}}
+        envelope = {"id": "response-real-1", "model": "returned-model-snapshot", "answers": answers,
+                    "usage": usage, "provider_extension": {"nullable": None, "enabled": False,
+                    "nested": [{"unknown": [1, 2]}]}, **extension}
+        return ProviderResponse(id=envelope["id"], model=envelope["model"], status=status,
+                                output_text=output_text, usage=SimpleNamespace(model_dump=lambda **_: copy.deepcopy(usage)),
+                                envelope=envelope)
 
     @contextmanager
     def sdk(self, response=None, *, side_effect=None):
         client = MagicMock()
         client.__enter__.return_value = client
-        client.responses.create.return_value = response or self.response()
-        client.responses.create.side_effect = side_effect
+        if response is None and side_effect is None:
+            client.decisions.create.side_effect = lambda **request: self.response(genres=[q["name"] for q in request["questions"]])
+        else:
+            client.decisions.create.return_value = response or self.response()
+            client.decisions.create.side_effect = side_effect
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sdk-test-secret"}, clear=True):
             with patch("preferences.dotenv_values", return_value={}) as dotenv:
                 with patch("preferences.OpenAI", return_value=client) as factory:
-                    yield factory, client.responses.create, dotenv
+                    yield factory, client.decisions.create, dotenv
 
     def rows(self, table):
         with closing(sqlite3.connect(self.database)) as connection:
@@ -125,9 +127,9 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertEqual(saved["response_id"], response.id)
         self.assertEqual(saved["usage"], response.envelope["usage"])
         self.assertEqual(factory.call_args.kwargs["max_retries"], 0)
-        self.assertEqual(create.call_args.kwargs["reasoning"], {"effort": "none"})
+        self.assertNotIn("reasoning", create.call_args.kwargs)
         self.assertEqual(create.call_count, 1)
-        self.assertEqual(json.loads(create.call_args.kwargs["input"]), {"likes": "Crime dramas", "dislikes": "Horror"})
+        self.assertEqual(json.loads(create.call_args.kwargs["input"][-1]["content"]), {"likes": "Crime dramas", "dislikes": "Horror"})
         provenance = saved["_provenance"]
         for field in ("profile_id", "attempt_id", "cache_key", "prompt_version", "schema_version", "profile_version", "origin"):
             self.assertTrue(provenance[field])
@@ -135,11 +137,11 @@ class ProfileProvenanceTests(unittest.TestCase):
             attempt = reopened.get_attempt(provenance["attempt_id"])
             profile = reopened.get_profile(provenance["profile_id"])
         self.assertEqual(attempt["status"], "success")
-        self.assertEqual(attempt["request"]["reasoning"], {"effort": "none"})
+        self.assertEqual(attempt["request"]["endpoint"], "/v1/decisions")
         self.assertEqual(attempt["response"], response.envelope)
         self.assertIn("Crime dramas", json.dumps(attempt))
         self.assertIn(INSTRUCTIONS.strip(), json.dumps(attempt).replace("\\n", "\n"))
-        self.assertIn("liked_genres", json.dumps(attempt))
+        self.assertIn("questions", attempt["request"])
         self.assertIn(self.profile, profile.values())
         self.assertNotIn("sdk-test-secret", json.dumps(attempt))
 
@@ -580,22 +582,11 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertEqual(len(self.rows("preference_profiles")), 4)
 
     def test_real_sdk_response_preserves_absent_fields_explicit_nulls_and_unknown_extensions(self):
-        source = {
-            "id": "real-sdk-response", "model": "returned-model-snapshot", "status": "completed",
-            "error": None,
-            "output": [{
-                "id": "real-sdk-message", "type": "message", "role": "assistant", "status": "completed",
-                "content": [{"type": "output_text", "text": json.dumps(self.profile), "annotations": []}],
-            }],
-            "usage": {
-                "input_tokens": 17, "output_tokens": 23, "total_tokens": 40,
-                "input_tokens_details": {"cached_tokens": 0, "provider_detail": None},
-                "output_tokens_details": {"reasoning_tokens": 4},
-                "provider_usage_extension": {"nullable": None, "observed": True},
-            },
-            "provider_extension": {"nullable": None, "nested": [{"unrecognized": [1, 2]}]},
-        }
-        response = Response.model_construct(**source)
+        source = self.response().envelope
+        source.pop("id")
+        source["error"] = None
+        source["usage"]["provider_usage_extension"] = {"nullable": None, "observed": True}
+        response = Decision.model_construct(**source)
         with self.sdk(response):
             saved, cached = self.interpreter.get_profile_record("Crime dramas", "Horror")
         self.assertFalse(cached)
@@ -608,7 +599,7 @@ class ProfileProvenanceTests(unittest.TestCase):
         self.assertIsNone(attempt["response"]["error"])
         self.assertNotIn("incomplete_details", attempt["response"])
         self.assertNotIn("metadata", attempt["response"])
-        self.assertNotIn("logprobs", attempt["response"]["output"][0]["content"][0])
+        self.assertIsNone(saved["response_id"])
         self.assertIsNone(attempt["response"]["provider_extension"]["nullable"])
 
 

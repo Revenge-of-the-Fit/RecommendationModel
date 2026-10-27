@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 import uuid
 import zlib
 from contextlib import closing, contextmanager
@@ -15,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from storage.database import WATCH_EVENTS, StorageError, open_database
+from storage.payloads import unpack_json
 
 
 TABLES = (
@@ -181,6 +183,14 @@ def capacity_status(path, *, min_free_bytes=0, max_database_bytes=None):
     return result
 
 
+def checkpoint_database(path):
+    """Try to clear a reusable WAL, yielding quickly when a reader blocks it."""
+    path = Path(path).resolve()
+    with closing(sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=0.05)) as connection:
+        busy, frames, completed = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    return {"busy": bool(busy), "frames": frames, "checkpointed_frames": completed}
+
+
 def storage_status(path, *, min_free_bytes=0, max_database_bytes=None):
     result = {
         **capacity_status(path, min_free_bytes=min_free_bytes, max_database_bytes=max_database_bytes),
@@ -279,7 +289,8 @@ def backup_database(path, archive_directory, *, retain=7, min_free_bytes=0, max_
         raise ValueError("At least one archived backup must be retained")
     path = Path(path).resolve()
     directory = Path(archive_directory).resolve()
-    status = storage_status(path, min_free_bytes=min_free_bytes, max_database_bytes=max_database_bytes)
+    # Validate the isolated snapshot below; scanning the live database pins its WAL.
+    status = capacity_status(path, min_free_bytes=min_free_bytes, max_database_bytes=max_database_bytes)
     if not status["healthy"]:
         raise StorageError("Storage integrity or capacity check failed")
     temporary_paths = []
@@ -290,6 +301,8 @@ def backup_database(path, archive_directory, *, retain=7, min_free_bytes=0, max_
         directory.mkdir(parents=True, exist_ok=True)
         archive_lock = _acquire_archive_lock(directory)
         with _read_database(path) as source:
+            # A fixed snapshot prevents each concurrent commit restarting a large copy.
+            # Release it immediately after the bounded copy, before validation/compression.
             source.execute("BEGIN")
             size = source.execute("PRAGMA page_count").fetchone()[0] * source.execute("PRAGMA page_size").fetchone()[0]
             if _free_space(directory) < min_free_bytes + size * 2 + CHUNK_BYTES:
@@ -297,11 +310,18 @@ def backup_database(path, archive_directory, *, retain=7, min_free_bytes=0, max_
             snapshot = _temporary_file(directory, ".sqlite3")
             temporary_paths.append(snapshot)
             with closing(sqlite3.connect(snapshot)) as target:
-                source.backup(target, pages=128, sleep=0.01)
-                target.execute("PRAGMA journal_mode=DELETE")
-                report = _report(target)
-                if not report["integrity_ok"] or report["foreign_key_violations"]:
-                    raise StorageError("Backup integrity check failed")
+                deadline = time.monotonic() + 600
+                def progress(*_):
+                    if time.monotonic() > deadline:
+                        raise StorageError("Backup time budget exceeded; previous archives retained")
+                source.backup(target, pages=1024, sleep=0.01, progress=progress)
+        # Release the source before checking/compressing its copy.
+        checkpoint_database(path)
+        with closing(sqlite3.connect(snapshot)) as target:
+            target.execute("PRAGMA journal_mode=DELETE")
+            report = _report(target)
+            if not report["integrity_ok"] or report["foreign_key_violations"]:
+                raise StorageError("Backup integrity check failed")
         created = datetime.now(timezone.utc)
         name = f"observations-backup-{created.strftime('%Y%m%dT%H%M%S%fZ')}-{uuid.uuid4().hex}.sqlite3.gz"
         archive = directory / name
@@ -440,7 +460,7 @@ def restore_backup(archive, target, *, min_free_bytes=0):
 
 def _json(value):
     try:
-        result = json.loads(value)
+        result = json.loads(unpack_json(value))
         return result if isinstance(result, dict) else {}
     except (TypeError, ValueError, RecursionError):
         return {}
@@ -472,6 +492,9 @@ def _row_times(table, row):
 
 
 def _encoded_row(row):
+    row = dict(row)
+    if "record_json" in row:
+        row["record_json"] = unpack_json(row["record_json"])
     return {
         key: {"$type": "bytes", "base64": base64.b64encode(value).decode("ascii")}
         if isinstance(value, bytes) else value

@@ -1,17 +1,34 @@
 import os
+import shutil
 import sqlite3
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 
-DATABASE_SCHEMA_VERSION = 6
+DATABASE_SCHEMA_VERSION = 7
 DEFAULT_STORAGE_PATH = Path(__file__).resolve().parents[2] / "data" / "live" / "events.sqlite3"
 WATCH_EVENTS = "event_type='watch' AND parse_status='parsed' AND user_id IS NOT NULL AND movie_id IS NOT NULL"
 
 
 class StorageError(RuntimeError):
     pass
+
+
+class CapacityConnection(sqlite3.Connection):
+    """Check physical limits before transactions, including long-lived writers."""
+
+    def __enter__(self):
+        minimum = int(os.environ.get("STORAGE_MIN_FREE_BYTES", "0"))
+        maximum_wal = int(os.environ.get("STORAGE_MAX_WAL_BYTES", str(4 * 1024**3)))
+        if minimum < 0 or maximum_wal <= 0:
+            raise ValueError("Storage capacity limits must be nonnegative with a positive WAL limit")
+        wal = Path(str(self.storage_path) + "-wal")
+        if (wal.exists() and wal.stat().st_size >= maximum_wal) or (
+            minimum and shutil.disk_usage(self.storage_path.parent).free < minimum
+        ):
+            raise sqlite3.OperationalError("Storage write paused at the disk or WAL safety limit")
+        return super().__enter__()
 
 
 def watch_order(event_timestamp, broker_timestamp_ms, partition, offset):
@@ -28,7 +45,8 @@ def watch_order(event_timestamp, broker_timestamp_ms, partition, offset):
 def open_database(path: Path, busy_timeout: float = 1.0) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path, timeout=busy_timeout)
+    connection = sqlite3.connect(path, timeout=busy_timeout, factory=CapacityConnection)
+    connection.storage_path = path
     try:
         connection.create_function("watch_order", 4, watch_order, deterministic=True)
         connection.execute("PRAGMA busy_timeout=0")

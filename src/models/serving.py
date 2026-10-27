@@ -20,6 +20,8 @@ class RecommendationResult(BaseModel):
     recommendations: list[Recommendation] = Field(min_length=1, max_length=20)
     fallback_reason: str | None = None
     cached: bool | None = None
+    preparation_attempted: bool | None = None
+    preparation_wait_ms: float | None = None
     llm_model: str | None = None
     profile_version: str | None = None
     profile_id: str | None = None
