@@ -174,12 +174,21 @@ checkpoint the original and retain it under a rollback filename before installin
 the compact copy. Preserve its ownership. Never discard an uncheckpointed WAL.
 Do not start schema-6 containers against the compact database.
 
-Maintenance checks capacity/checkpoints every 60 seconds. Backup no longer runs
+Maintenance checks capacity/checkpoints every 60 seconds between backups.
+Backup no longer runs
 integrity scans against the live database or holds its source transaction while
 validating/compressing the copy. Verification runs on the isolated copy; incremental
 copying holds a fixed read snapshot so concurrent writes do not restart it, with
 a ten-minute time budget. A failed backup preserves previous archives
 and is retried later. Compose defaults to two verified backups within 24 GiB.
+Verification and compression of a large isolated copy can take much longer than
+the ten-minute live-copy budget. Inspect `storage_backup` log entries for the
+result; temporary `.observations-*` files belong to the active backup. Retain the
+pre-conversion database until a fresh backup has succeeded, then remove that
+redundant copy to restore headroom for future backups.
+
+Our VM's private `.env` sets `STORAGE_BUSY_TIMEOUT=5` for Kafka ingestion and
+request-log writes. HTTP preparation waiting uses the separate budgets above.
 
 Before write transactions, persistent writers check an 8 GiB free-space reserve
 and a 4 GiB WAL limit. A blocked reader can therefore pause ingestion/logging
@@ -188,3 +197,7 @@ Maintenance can checkpoint the WAL after the reader closes. `STORAGE_MAX_BYTES`
 still limits main-database pages (96 GiB in Compose). These guards and compression
 do not provide indefinite history storage: they make growth smaller and bounded
 failures visible. No training or evaluation history is automatically expired.
+
+The October 25 deployment checks captured 457/457 successful course responses
+within 600 ms. A fresh schema-7 backup passed integrity and compression checks;
+removing the redundant original database left 145 GiB free (38% disk usage).
