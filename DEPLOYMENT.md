@@ -80,7 +80,8 @@ The Docker Kafka service can read the private configuration before dropping priv
 Keep `.env` and `mlip-kafka.conf` outside Git. Port `8082` must be reachable by the course server.
 
 The first start downloads the catalog and trains the model. Later starts reuse the model volume.
-To replace it, prefix the Compose command with `RETRAIN_MODEL=1`.
+`RETRAIN_MODEL=1` rebuilds from the fixed M0 dataset. For recent production data,
+use the update command below.
 
 ## Our existing VM
 
@@ -201,3 +202,97 @@ failures visible. No training or evaluation history is automatically expired.
 The October 25 deployment checks captured 457/457 successful course responses
 within 600 ms. A fresh schema-7 backup passed integrity and compression checks;
 removing the redundant original database left 145 GiB free (38% disk usage).
+
+## Retrain on recent production data
+
+With the current source deployed in `/home/production`, run:
+
+```bash
+sudo env APP_REVISION=<deployed-source-commit> bash scripts/update_model.sh
+```
+
+The [script](scripts/update_model.sh) builds the update/API images while the API
+continues serving, prepares data, runs `MovieDataset` validation, invokes the
+existing [trainer](src/train.py), validates and installs the candidate, then
+recreates only the API. Kafka and maintenance stay running. Allow up to ten
+minutes for API startup, including the existing profile-cache checks. A short
+serving interruption is accepted for M2. No credentials are needed by training.
+
+[Preparation](src/prepare_recent_data.py) defaults to `[now - 24 hours, now)` in
+UTC. It reads at most 200,000 retained events, split equally between the captured
+`movielog2` partitions, using their indexed offset tails. It keeps parsed watch
+and rating events in the window that were ingested by its end, drops movies
+outside the candidate catalog and invalid IDs/ratings, and selects at most 5,000
+users by usable-event count (ties: user ID). The movie pool is fixed before reading
+recent outcomes: up to 2,000 catalog movies ranked by the previous model's
+popularity, with movie-ID ties. These caps bound EASE's dense matrices; this is an
+activity-biased sample, not the complete day's data. Watch retention stores the
+latest position per user/movie, so watch counts are not exact views or minutes.
+
+Movie features and licensing costs reuse the existing provisioned catalog;
+movies absent from it are excluded. User descriptions use the latest cached API
+snapshot available by the cutoff, or blank strings if none exists. There are no
+live metadata/API/LLM calls during preparation or training. The SQLite snapshot
+is closed before file export/training, and reads have a 90-second SQL budget to
+avoid holding the live journal open indefinitely. The window and limits can be
+changed with `--hours`, `--end` (offset-aware ISO timestamp), `--max-events`,
+`--max-users`, and `--max-movies` after the script name.
+
+Each run is retained in the model volume at `/app/models/updates/<UTC-time>-<pid>`:
+
+| File under `data/` | Format and purpose |
+| --- | --- |
+| `events.csv.gz`, `users.csv.gz`, `movies.csv.gz` | Existing `MovieDataset` format, ready for the trainer and offline evaluation. |
+| `catalog.csv.gz` | Full provisioned movie metadata, including `license_cost` and runtime. |
+| `kafka_events.jsonl.gz` | Window-filtered source sample before training user/movie filtering; source/topic/partition/offset, timestamps, IDs, parse status and `parsed` fields. Includes recommendation records for online evaluation. |
+| `llm_usage.jsonl.gz` | At most 5,000 most recently inserted attempts filtered by start time; attempt ID, start/finish, status, model, endpoint and usage. Failed calls with recorded usage are included. Full prompts are omitted. |
+| `dataset-manifest.json` | Window, actual training dates, limits, counts, offset bounds, cap indicators, previous model hash and export checksums. |
+
+Evaluation owners should use the manifest to report sample coverage, select a
+time split before fitting an evaluation model, and avoid treating retained watch
+rows as exact paid views. The usage export reflects attempts' current recorded
+state, not a historical reconstruction; missing usage must not be counted as
+zero cost. Exports are read-only snapshots; no consumer-group offsets are changed.
+Copy only the needed run's `data/` directory for evaluation, keeping production
+user descriptions out of Git.
+
+The candidate is saved as `candidate.npz` in its run directory. The
+[installer](src/model_update.py) checks catalogs, array shapes, finite weights,
+fallback recommendations, unchanged hyperparameters and export checksums before
+replacing `/app/models/recommender.npz`. Failed preparation, training or validation
+leaves that file untouched. An update lock prevents concurrent script runs, and
+the previous artifact is retained as `/app/models/recommender.previous.npz`.
+The existing manifest records training dates, export location and before/after
+fingerprints. The final check requests a recommendation and matches its request
+log's loaded model fingerprint to the candidate. Save that final JSON for the
+report; a file replacement alone does not demonstrate a successful deployment.
+If startup fails after installation, restore `recommender.previous.npz` and
+recreate the API; the candidate/export remain available for inspection. Run
+directories are not automatically expired; retain the run used for the M2 results
+and remove unneeded older run directories when they are no longer in use.
+
+### M2 report contribution
+
+**Automated model updates:** A manually triggered [shell script](scripts/update_model.sh)
+exports a bounded recent production sample with [preparation](src/prepare_recent_data.py),
+validates it with `MovieDataset`, and runs the existing EASE [trainer](src/train.py)
+with unchanged hyperparameters. It saves and [validates a candidate](src/model_update.py)
+before replacing the model in the persistent volume and restarting the API through
+Compose. Preparation/training/validation failures preserve the current artifact;
+one previous artifact is retained. The deployment check verifies a successful
+response was served with the candidate's fingerprint. Add the actual VM run's
+training dates, old/new fingerprints and response result here after deployment.
+
+**Pipeline structure:** [Kafka ingestion](src/consume_events.py) and the
+[metadata client](src/services/metadata.py) persist observations in SQLite. Recent
+data preparation exports the existing three-table dataset format; the
+[dataset module](src/dataset.py) validates it and combines watches/ratings into
+user/movie interactions. [EASE](src/recommender.py) fits and serializes weights,
+and the update installer promotes the candidate. The
+[recommendation service](src/services/recommendation.py) loads the model and uses
+live history or the LLM cold-start path; [request logging](src/api/request_logging.py)
+records outputs and model versions for evaluation. Evaluation is separate from
+production fitting. The [update tests](tests/test_model_update.py) exercise sample
+boundaries, metadata cutoffs, training compatibility, failed promotion, loaded
+version verification and the shell script's failure behavior without production
+connections.
