@@ -258,6 +258,10 @@ state, not a historical reconstruction; missing usage must not be counted as
 zero cost. Exports are read-only snapshots; no consumer-group offsets are changed.
 Copy only the needed run's `data/` directory for evaluation, keeping production
 user descriptions out of Git.
+The successful M2 run's exports are in
+`/app/models/updates/20261028T051943Z-1887626/data` in the API container (the
+`recommendationmodel_model` volume). Preserve this directory for the evaluation
+owners and the report; its manifest identifies the exact snapshot and limits.
 
 The candidate is saved as `candidate.npz` in its run directory. The
 [installer](src/model_update.py) checks catalogs, array shapes, finite weights,
@@ -285,8 +289,24 @@ with unchanged hyperparameters. It saves and [validates a candidate](src/model_u
 before replacing the model in the persistent volume and restarting the API through
 Compose. Preparation/training/validation failures preserve the current artifact;
 one previous artifact is retained. The deployment check verifies a successful
-response was served with the candidate's fingerprint. Add the actual VM run's
-training dates, old/new fingerprints and response result here after deployment.
+response was served with the candidate's fingerprint.
+
+The VM run of source `fe91403` on October 28, 2026 completed the full command.
+Its requested window was the previous 24 hours, bounded to 200,000 retained
+events. The selected training events spanned **02:32:40–05:09:30 UTC on October 28**:
+13,619 events, 8,253 user/movie pairs, 5,000 users and 2,000 movies. EASE training
+took 1.63 seconds with regularization 100 and minimum positive rating 6.
+API startup took about six minutes, including the existing profile-cache checks.
+
+| Deployment evidence | Result |
+| --- | --- |
+| Previous model SHA-256 | `6036093ce0cd94cb5aa6848696cdb3bcf1fc8eee617725cebc0488874231f9a7` |
+| Updated model SHA-256 | `47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6` |
+| Verified request | `047b792476f24a76ba8cd4b76d54f032`: HTTP 200, 20 recommendations, 28.052 ms over localhost; saved request version matched the updated fingerprint. |
+
+The script finished with `status: deployed`. API and storage health checks passed;
+all 190 accepted request logs had been written, with zero failed or rejected writes
+at that check. The snapshot manifest and raw run log remain on the VM, outside Git.
 
 **Pipeline structure:** [Kafka ingestion](src/consume_events.py) and the
 [metadata client](src/services/metadata.py) persist observations in SQLite. Recent
