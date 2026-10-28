@@ -82,17 +82,20 @@ def verify_deployment(manifest_path, storage_path, *, base_url="http://127.0.0.1
         raise ValueError("The updated service returned an invalid recommendation response")
     expected = "sha256:" + manifest["model"]["sha256"]
     record = None
-    for _ in range(50):
+    deadline = time.monotonic() + 30
+    while True:
         connection = sqlite3.connect(Path(storage_path).resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
         try:
             row = connection.execute("SELECT record_json FROM recommendation_requests WHERE request_id=?", (request_id,)).fetchone()
             record = load_json(row[0]) if row else None
         finally:
             connection.close()
-        if record:
+        if record or time.monotonic() >= deadline:
             break
         time.sleep(0.1)
-    if not record or record.get("versions", {}).get("model") != expected or record.get("status") != 200:
+    if not record:
+        raise ValueError(f"Request log was not persisted within 30 seconds (request={request_id}); inspect /health/storage")
+    if record.get("versions", {}).get("model") != expected or record.get("status") != 200:
         raise ValueError("No successful request record confirms the candidate was loaded")
     return {"status": "deployed", "request_id": request_id, "model_version": expected,
             "previous_model_sha256": manifest["previous_model_sha256"], "http_ms": round(elapsed, 3),

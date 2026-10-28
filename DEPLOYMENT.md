@@ -189,7 +189,10 @@ pre-conversion database until a fresh backup has succeeded, then remove that
 redundant copy to restore headroom for future backups.
 
 Our VM's private `.env` sets `STORAGE_BUSY_TIMEOUT=5` for Kafka ingestion and
-request-log writes. HTTP preparation waiting uses the separate budgets above.
+request-log writes. The background request logger makes up to three attempts for
+SQLite busy/locked errors; other errors and exhausted retries degrade storage
+health. HTTP responses do not wait for these writes or retries. HTTP preparation
+waiting uses the separate budgets above.
 
 Before write transactions, persistent writers check an 8 GiB free-space reserve
 and a 4 GiB WAL limit. A blocked reader can therefore pause ingestion/logging
@@ -266,6 +269,8 @@ The existing manifest records training dates, export location and before/after
 fingerprints. The final check requests a recommendation and matches its request
 log's loaded model fingerprint to the candidate. Save that final JSON for the
 report; a file replacement alone does not demonstrate a successful deployment.
+Verification allows up to 30 seconds for the asynchronous request log to persist;
+it still requires the exact request ID, status 200 and candidate fingerprint.
 If startup fails after installation, restore `recommender.previous.npz` and
 recreate the API; the candidate/export remain available for inspection. Run
 directories are not automatically expired; retain the run used for the M2 results

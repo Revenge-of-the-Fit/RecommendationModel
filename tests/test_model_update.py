@@ -166,26 +166,41 @@ def test_invalid_candidates_do_not_replace_deployed_artifact(production, failure
     assert not model.with_name("recommender.previous.npz").exists()
 
 
-@pytest.mark.parametrize("loaded", ["candidate", "wrong-version"])
+@pytest.mark.parametrize("loaded", ["candidate", "wrong-version", "delayed", "missing"])
 def test_deployment_check_requires_request_from_loaded_candidate(production, loaded):
     database, _, _, output = production
     manifest = output.parent / "manifest.json"
     manifest.write_text(json.dumps({"model": {"sha256": "candidate"}, "previous_model_sha256": "old",
                                     "training": {"data_directory": "recent", "actual_training_start": "start",
                                                  "actual_training_end": "end"}}))
-    with closing(sqlite3.connect(database)) as connection:
-        connection.execute("INSERT INTO recommendation_requests VALUES(?,?,?,?)", (
-            "request", "2026-10-28T00:00:00Z", 1,
-            pack_json(json.dumps({"status": 200, "versions": {"model": "sha256:" + loaded}, "padding": "x" * 2000}))))
-        connection.commit()
+    def persist():
+        version = "candidate" if loaded == "delayed" else loaded
+        with closing(sqlite3.connect(database)) as connection:
+            connection.execute("INSERT INTO recommendation_requests VALUES(?,?,?,?)", (
+                "request", "2026-10-28T00:00:00Z", 1,
+                pack_json(json.dumps({"status": 200, "versions": {"model": "sha256:" + version}, "padding": "x" * 2000}))))
+            connection.commit()
+
+    clock = [0.0]
+
+    def wait(seconds):
+        clock[0] += seconds
+        if loaded == "delayed" and clock[0] >= 6:
+            persist()
+
+    if loaded not in ("delayed", "missing"):
+        persist()
     response = io.BytesIO(b"a,b,c")
     response.headers = {"x-request-id": "request"}
-    with patch("model_update.urlopen", return_value=response):
-        if loaded == "candidate":
+    with patch("model_update.urlopen", return_value=response), \
+            patch("model_update.time.monotonic", side_effect=lambda: clock[0]), \
+            patch("model_update.time.sleep", side_effect=wait):
+        if loaded in ("candidate", "delayed"):
             assert verify_deployment(manifest, database)["recommendations"] == 3
         else:
-            with pytest.raises(ValueError, match="candidate was loaded"):
+            with pytest.raises(ValueError, match="not persisted" if loaded == "missing" else "candidate was loaded"):
                 verify_deployment(manifest, database)
+    assert clock[0] <= 30.1
 
 
 @pytest.mark.parametrize("failed_step", ["prepare_recent_data.py", "train.py", "model_update.py install", ""])
