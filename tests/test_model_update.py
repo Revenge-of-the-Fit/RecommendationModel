@@ -136,6 +136,26 @@ def test_empty_or_invalid_preparation_leaves_current_model_and_output_untouched(
         utc("2026-10-27T00:00:00")
 
 
+def test_failed_quality_check_blocks_preparation_before_changing_artifacts(production):
+    _, _, model, output = production
+    original = model.read_bytes()
+    report = {"status": "failed", "findings": [{"source": "movie_api", "reason": "strong_drift"}]}
+    with patch("prepare_recent_data.check_recent_quality", return_value=report) as check:
+        with pytest.raises(ValueError, match="movie_api"):
+            prepare(production, quality_reference="reference.json")
+    check.assert_called_once()
+    assert not output.exists()
+    assert model.read_bytes() == original
+
+
+def test_passing_quality_report_is_retained_with_prepared_data(production):
+    report = {"status": "passed", "findings": []}
+    with patch("prepare_recent_data.check_recent_quality", return_value=report):
+        manifest = prepare(production, quality_reference="reference.json")
+    assert json.loads((production[3] / "data-quality.json").read_text()) == report
+    assert "data-quality.json" in manifest["files"]
+
+
 @pytest.mark.parametrize("failure", ["nan", "corrupt", "changed_data", "stale_reference", "hyperparameters"])
 def test_invalid_candidates_do_not_replace_deployed_artifact(production, failure):
     _, catalog, model, output = production
