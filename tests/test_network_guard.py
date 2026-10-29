@@ -1,11 +1,21 @@
 import socket
+import sys
 import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from tests.network_guard import NetworkAccessError
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import network_guard
+from network_guard import NetworkAccessError
+
+
+def setUpModule():
+    # Already installed by conftest.py under pytest; this keeps the module runnable under unittest
+    network_guard.install()
 
 
 class NetworkGuardTests(unittest.TestCase):
