@@ -28,6 +28,20 @@ services:
     restart: "no"
     logging: *bounded-logging
 
+  model-update:
+    build: .
+    profiles: ["updates"]
+    entrypoint: ["python"]
+    environment:
+      APP_REVISION: ${APP_REVISION:-unknown}
+      STORAGE_PATH: /app/state/events/events.sqlite3
+    volumes:
+      - catalog:/app/data:ro
+      - model:/app/models
+      - event_logs:/app/state/events:ro
+    restart: "no"
+    logging: *bounded-logging
+
   api:
     build: .
     depends_on:

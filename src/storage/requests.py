@@ -2,6 +2,7 @@ import json
 import logging
 import queue
 import re
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -174,7 +175,16 @@ class RequestLog:
                 except queue.Empty:
                     continue
                 try:
-                    inserted = store.save_prepared(record)
+                    # Only the background writer waits/retries; HTTP responses do not.
+                    for attempt in range(3):
+                        try:
+                            inserted = store.save_prepared(record)
+                            break
+                        except sqlite3.OperationalError as error:
+                            code = getattr(error, "sqlite_errorcode", None)
+                            if (attempt == 2 or self.closing.is_set() or code is None
+                                    or code & 255 not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)):
+                                raise
                 except Exception as error:
                     category = type(error).__name__
                     with self.lock:

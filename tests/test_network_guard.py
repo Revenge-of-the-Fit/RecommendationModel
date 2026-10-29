@@ -60,6 +60,7 @@ class NetworkGuardTests(unittest.TestCase):
             thread.join()
             server.server_close()
 
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "Unix sockets are unavailable on this platform")
     def test_unix_sockets_are_allowed(self):
         with tempfile.TemporaryDirectory() as directory:
             path = str(Path(directory) / "s")

@@ -264,8 +264,45 @@ class ApiRequestLoggingTests(unittest.TestCase):
         self.read_request(response)
         self.assertEqual(self.record_count(), 1)
 
+    def test_transient_sqlite_locks_are_retried_without_losing_the_request(self):
+        real_save = RequestStore.save_prepared
+        for code in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_BUSY_SNAPSHOT, sqlite3.SQLITE_LOCKED):
+            with self.subTest(code=code):
+                error = sqlite3.OperationalError("database is locked")
+                error.sqlite_errorcode = code
+                calls = []
+
+                def save(store, record):
+                    calls.append(record)
+                    if len(calls) == 1:
+                        raise error
+                    return real_save(store, record)
+
+                with patch.object(RequestStore, "save_prepared", save):
+                    with patch("api.app.RecommendationService.load", return_value=self.service):
+                        with TestClient(create_app(self.settings)) as client:
+                            response = client.get("/recommend/42")
+                            self.assertEqual(response.status_code, 200)
+                            health = self.wait_for_storage(client, lambda status: status["written"] == 1)
+                            self.assertTrue(health.json()["healthy"])
+                            self.assertEqual(health.json()["failed"], 0)
+                            self.assertEqual(len(calls), 2)
+                self.read_request(response)
+
+    def test_persistent_sqlite_lock_has_bounded_retries_and_reports_failure(self):
+        error = sqlite3.OperationalError("database is locked")
+        error.sqlite_errorcode = sqlite3.SQLITE_BUSY
+        with patch.object(RequestStore, "save_prepared", side_effect=error) as save:
+            with patch("api.app.RecommendationService.load", return_value=self.service):
+                with self.assertLogs("storage.requests", level="ERROR"):
+                    with TestClient(create_app(self.settings)) as client:
+                        self.assertEqual(client.get("/recommend/42").status_code, 200)
+                        health = self.wait_for_storage(client, lambda status: status["failed"] == 1)
+                        self.assertFalse(health.json()["healthy"])
+                        self.assertEqual(save.call_count, 3)
+
     def test_writer_failure_degrades_health_without_changing_recommendations(self):
-        with patch.object(RequestStore, "save_prepared", side_effect=sqlite3.OperationalError("writer-secret")):
+        with patch.object(RequestStore, "save_prepared", side_effect=sqlite3.OperationalError("writer-secret")) as save:
             with patch("api.app.RecommendationService.load", return_value=self.service):
                 with self.assertLogs("storage.requests", level="ERROR") as captured:
                     with TestClient(create_app(self.settings)) as client:
@@ -276,6 +313,7 @@ class ApiRequestLoggingTests(unittest.TestCase):
                         self.assertEqual(health.status_code, 503)
                         self.assertFalse(health.json()["healthy"])
                         self.assertEqual(health.json()["last_error"], "OperationalError")
+                        self.assertEqual(save.call_count, 1)
                 self.assertNotIn("writer-secret", " ".join(captured.output))
         with RequestStore(self.path) as store:
             self.assertIsNone(store.get_request(response.headers["x-request-id"]))
