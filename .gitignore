@@ -12,3 +12,4 @@ data/
 .coverage
 coverage.xml
 htmlcov/
+reports/
