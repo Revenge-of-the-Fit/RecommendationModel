@@ -3,6 +3,10 @@
 Tests must not touch production Kafka, the course APIs, or an LLM provider. Loopback
 (for tests that start a local HTTP server) and unix sockets stay allowed. Name lookups
 are blocked too, since they leave the machine.
+
+This covers Python-level sockets, which is what HTTP clients and the LLM SDK use. The Kafka
+client opens its own native sockets, which Python cannot intercept, so creating a real Kafka
+Consumer or Producer is blocked instead. Tests inject fakes for Kafka.
 """
 import socket
 
@@ -32,6 +36,20 @@ def _guard_address(original):
     return guarded
 
 
+def _block_kafka_clients() -> None:
+    try:
+        import confluent_kafka
+    except ImportError:
+        return
+
+    def blocked(*args, **kwargs):
+        raise NetworkAccessError("A test tried to create a real Kafka client; inject a fake instead")
+
+    for name in ("Consumer", "Producer"):
+        _original[name] = getattr(confluent_kafka, name)
+        setattr(confluent_kafka, name, blocked)
+
+
 def install() -> None:
     if _original:
         return
@@ -46,3 +64,4 @@ def install() -> None:
     socket.socket.connect = _guard_address(_original["connect"])
     socket.socket.connect_ex = _guard_address(_original["connect_ex"])
     socket.getaddrinfo = getaddrinfo
+    _block_kafka_clients()

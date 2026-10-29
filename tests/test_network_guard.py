@@ -29,6 +29,14 @@ class NetworkGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(NetworkAccessError, "203.0.113.7"):
             socket.socket().connect_ex(("203.0.113.7", 9092))
 
+    def test_real_kafka_clients_cannot_be_created(self):
+        # The Kafka client uses native sockets that Python cannot intercept
+        import confluent_kafka
+
+        for client in (confluent_kafka.Consumer, confluent_kafka.Producer):
+            with self.assertRaisesRegex(NetworkAccessError, "real Kafka client"):
+                client({"bootstrap.servers": "203.0.113.7:9092"})
+
     def test_the_error_cannot_be_mistaken_for_a_connection_failure(self):
         self.assertFalse(issubclass(NetworkAccessError, OSError))
 
