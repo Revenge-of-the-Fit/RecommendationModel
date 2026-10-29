@@ -321,3 +321,99 @@ production fitting. The [update tests](tests/test_model_update.py) exercise samp
 boundaries, metadata cutoffs, training compatibility, failed promotion, loaded
 version verification and the shell script's failure behavior without production
 connections.
+
+## Schema and drift checks
+
+Existing Kafka parsing validates timestamps, user IDs, rating bounds and event
+grammar. Parser version 2 also rejects movie IDs containing the delimiters or
+whitespace that cannot appear in our recommendation output. Invalid events stay
+in the audit log as parse failures and are excluded from live history/training.
+The recommendation route normalizes positive 64-bit integer user IDs and returns
+422 for invalid IDs. Its existing response model enforces finite scores and
+1–20 unique movie IDs.
+
+[Shared metadata validation](src/data_quality.py) is called by the
+[collector](src/services/metadata.py) and production sampler, after the existing
+[HTTP decoder](src/services/metadata_http.py) checks identities and response shape.
+It checks nullable text fields, whole ages
+from 0 to 120, finite nonnegative runtime/cost, and supported genre shapes.
+Numeric strings, missing/null optional fields, zero/unknown runtime, empty
+descriptions and extra fields are supported. Identity matching, JSON shape,
+nonfinite JSON, duplicate keys, size limits and timeouts reuse existing checks.
+Invalid record fields are retained in the fetch audit but excluded from usable
+metadata snapshots; valid records from the same batch remain usable. Invalid
+batch identities/JSON reject the entire batch. Unresolved users follow the
+existing cold-start fallback/retry path.
+
+[Production checks](src/check_data_quality.py) read at most 5,000 retained Kafka
+rows across partitions and 5,000 request logs, filtered to the requested 24-hour
+window. Kafka selection uses ingestion time, including malformed events;
+requests use start time. Offset/row-ID tail reads avoid full-database scans. The
+live read transaction closes before decoding or making API calls. Each check
+also reads the user/movie APIs for fixed cohorts of up to 100 IDs each, with a
+one-second minimum call interval. The initial user cohort comes from sampled
+Kafka users; movies come from the provisioned catalog. Metadata reflects API
+state at check time, not a reconstruction of past metadata.
+
+| Source | Compared categorical distributions |
+| --- | --- |
+| Kafka | Schema validity, event type and rating value. |
+| User API | Schema validity, age bands and description presence. Age cutoffs are 18, 30, 45 and 60. |
+| Movie API | Schema validity, genre combinations, runtime bands at 1/60/120/180 minutes and cost bands at USD 0.01/0.1/1/10. Missing values form a separate category. |
+| Recommendation API | Schema validity, HTTP status, serving method and latency bands at 100/400/600 ms. |
+
+Each distribution uses total variation distance, half the sum of absolute
+differences between reference/current category fractions. Distance greater than
+0.30 flags strong drift. A source needs at least 50 observations in both samples;
+otherwise the run reports insufficient data and fails. Features with fewer than
+50 values in either sample are explicitly unassessed, including rare ratings.
+More than 10% invalid records in a source also fails the check. Smaller counts of
+schema failures remain visible and those individual records are skipped/rejected.
+Results name the affected source, feature/reason and threshold. These coarse
+checks detect large changes in the sampled data, not every kind of drift.
+
+Establish a production reference once, after deploying the source and building
+the `model-update` image. This reads the course APIs and stores aggregates and
+cohort IDs in the model volume, with no LLM calls:
+
+```bash
+sudo docker compose --project-name recommendationmodel run --rm --no-deps -T \
+  model-update src/check_data_quality.py \
+  --save-reference /app/models/data-quality-reference.json
+```
+
+This refuses to overwrite an existing reference or save one with insufficient
+coverage or excessive schema failures. Keep the reference fixed. Replace it
+only after reviewing a legitimate source change and preserving the old file.
+Run a current comparison with:
+
+```bash
+sudo docker compose --project-name recommendationmodel run --rm --no-deps -T \
+  model-update src/check_data_quality.py \
+  --reference /app/models/data-quality-reference.json
+```
+
+The CLI exits 0 for a passed comparison, 2 for findings and 1 for execution errors.
+`--output` saves the report outside Git. In Compose, `DATA_QUALITY_REFERENCE`
+points [recent-data preparation](src/prepare_recent_data.py) at this reference.
+Preparation runs the same checks before creating a candidate dataset and
+rejects model updates when checks fail. Passing reports are retained as
+`data-quality.json` with the dataset, including the reference fingerprint.
+Standalone fixture/M0 callers can omit `--quality-reference`; the production
+update service supplies it. No drift scan or network call is added to the HTTP
+request path, and serving continues when an update is rejected.
+
+**M2 data-quality report contribution:** We reuse Kafka and recommendation API
+schemas and add shared user/movie metadata field validation, preserving supported
+missing values and cold-start fallback. [Production checks](src/check_data_quality.py)
+compare bounded retained Kafka/request samples and fixed cohorts of 100 live
+user/movie API records against an explicit production reference. Histograms cover
+schema validity, event/rating mix, user age/descriptions, movie runtime/cost/genres,
+and API status/method/latency. Total variation distance greater than 0.30 flags
+strong drift; fewer than 50 source observations is inconclusive and blocks updates,
+as does a schema failure rate above 10%. Data preparation runs these checks before
+training, retaining a report on success and preserving the deployed model on
+failure. [Tests](tests/test_data_quality.py) cover malformed and supported inputs,
+normal variation, deliberate large shifts in every source, insufficient coverage,
+bounded reads and released SQLite snapshots. Production samples and references
+stay outside Git. VM results will be added after deployment verification.

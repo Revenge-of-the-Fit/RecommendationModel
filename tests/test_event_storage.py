@@ -71,7 +71,7 @@ class EventStorageTests(unittest.TestCase):
             self.assertEqual(saved["movie_id"], "movie_a")
             self.assertEqual(saved["event_type"], "watch")
             self.assertEqual(saved["parse_status"], "parsed")
-            self.assertEqual(saved["parser_version"], 1)
+            self.assertEqual(saved["parser_version"], 2)
             self.assertEqual(saved["parsed"], parsed)
             self.assertEqual(reopened.list_events(42), [saved])
             self.assertIsNone(reopened.get_event("missing", envelope.topic, envelope.partition, envelope.offset))

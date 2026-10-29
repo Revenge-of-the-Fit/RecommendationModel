@@ -35,6 +35,8 @@ services:
     environment:
       APP_REVISION: ${APP_REVISION:-unknown}
       STORAGE_PATH: /app/state/events/events.sqlite3
+      DATA_QUALITY_REFERENCE: ${DATA_QUALITY_REFERENCE:-/app/models/data-quality-reference.json}
+      METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
     volumes:
       - catalog:/app/data:ro
       - model:/app/models
