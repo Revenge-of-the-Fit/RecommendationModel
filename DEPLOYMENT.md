@@ -425,4 +425,14 @@ training, retaining a report on success and preserving the deployed model on
 failure. [Tests](tests/test_data_quality.py) cover malformed and supported inputs,
 normal variation, deliberate large shifts in every source, insufficient coverage,
 bounded reads and released SQLite snapshots. Production samples and references
-stay outside Git. VM results will be added after deployment verification.
+stay outside Git. On 2026-10-29 at 06:14–06:21 UTC, checks before and after a
+production model update passed for 5,000 Kafka records, 5,000 request logs and
+100 records from each metadata API, with no observed schema failures. The
+largest drift distance was 0.10787, below 0.30, against the unchanged reference.
+The training export retained its passing report at
+`/app/models/updates/20261029T061410Z-1965682/data/data-quality.json`.
+The verified new model (`673e4103…`) returned 20 recommendations in 24.387 ms.
+Three additional localhost requests completed in 2.731–23.331 ms; zero,
+nonnumeric and out-of-range user IDs returned 422. These timings exclude
+course-to-VM network latency. The offline suite passed 380 tests and 320 subtests
+with 89% overall coverage, including deliberate drift and malformed-data cases.
