@@ -79,7 +79,7 @@ def test_unsafe_kafka_movie_ids_are_retained_as_parse_failures(body):
 
 def normal_rows():
     return {
-        "kafka": {"parse_status": "parsed", "event_type": "watch", "fields": {}},
+        "kafka": {"parse_status": "parsed", "event_type": "recommendation", "fields": {}},
         "user_api": {"user_id": 42, "age": 25, "self_description_likes": "Drama"},
         "movie_api": {"id": "a", "runtime": 90, "cost": 0.05, "genres": ["Drama"]},
         "recommendation_api": {"user_id": 42, "status": 200, "response_body": "a,b", "latency_ms": 10, "serving_method": "ease"},
@@ -107,6 +107,40 @@ def test_strong_shifts_identify_the_affected_source(source, changes):
     assert {finding["source"] for finding in report["findings"]} == {source}
     assert all(finding["reason"] == "strong_drift" for finding in report["findings"])
     assert reference == original
+
+
+
+@pytest.mark.parametrize("watch_count", [0, 4675])
+def test_watch_retention_changes_do_not_look_like_stream_drift(watch_count):
+    def kafka(recommendations, watches, ratings, signups):
+        return profile("kafka", [
+            {"parse_status": "parsed", "event_type": kind, "fields": {"rating": 8}}
+            for kind, count in (("recommendation", recommendations), ("watch", watches),
+                                ("rating", ratings), ("account_created", signups))
+            for _ in range(count)
+        ])
+
+    reference, current = snapshot(), snapshot()
+    reference["sources"]["kafka"] = kafka(1545, 2068, 1351, 36)
+    current["sources"]["kafka"] = kafka(180, watch_count, 142, 3)
+    original = copy.deepcopy(reference)
+    report = compare(reference, current)
+    assert report["status"] == "passed"
+    assert report["distances"]["kafka"]["event_type_non_watch"] < 0.03
+    assert current["sources"]["kafka"]["features"]["event_type"].get("watch", 0) == watch_count
+    assert reference == original
+
+
+def test_large_rating_shift_still_fails_when_watch_counts_change():
+    reference, current = snapshot(), snapshot()
+    for sample, rating, watches in ((reference, 1, 100), (current, 10, 900)):
+        sample["sources"]["kafka"] = profile("kafka", [
+            {"parse_status": "parsed", "event_type": "rating", "fields": {"rating": rating}}
+        ] * 100 + [{"parse_status": "parsed", "event_type": "watch"}] * watches)
+    report = compare(reference, current)
+    assert report["status"] == "failed"
+    assert report["findings"] == [{"source": "kafka", "feature": "rating", "reason": "strong_drift",
+                                   "distance": 1.0, "threshold": 0.3}]
 
 
 def test_normal_variation_passes_and_small_features_are_not_overinterpreted():

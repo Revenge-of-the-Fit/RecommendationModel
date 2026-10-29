@@ -357,10 +357,19 @@ state at check time, not a reconstruction of past metadata.
 
 | Source | Compared categorical distributions |
 | --- | --- |
-| Kafka | Schema validity, event type and rating value. |
+| Kafka | Schema validity, event-type proportions among non-watch records, and rating value. |
 | User API | Schema validity, age bands and description presence. Age cutoffs are 18, 30, 45 and 60. |
 | Movie API | Schema validity, genre combinations, runtime bands at 1/60/120/180 minutes and cost bands at USD 0.01/0.1/1/10. Missing values form a separate category. |
 | Recommendation API | Schema validity, HTTP status, serving method and latency bands at 100/400/600 ms. |
+
+
+Kafka profiles retain counts for all event types, but event-type drift compares
+only ratings, recommendations and account registrations. Watch records are
+buffered and replaced by the latest record per user/movie, so their retained
+share changes with replay and retention and cannot estimate their stream
+frequency. Watch rows still contribute to schema checks. We do not claim to
+measure drift in watch frequency from this compacted sample. Comparison filters
+watch counts from both histograms without changing the saved reference.
 
 Each distribution uses total variation distance, half the sum of absolute
 differences between reference/current category fractions. Distance greater than
@@ -408,7 +417,7 @@ schemas and add shared user/movie metadata field validation, preserving supporte
 missing values and cold-start fallback. [Production checks](src/check_data_quality.py)
 compare bounded retained Kafka/request samples and fixed cohorts of 100 live
 user/movie API records against an explicit production reference. Histograms cover
-schema validity, event/rating mix, user age/descriptions, movie runtime/cost/genres,
+schema validity, non-watch event mix and ratings, user age/descriptions, movie runtime/cost/genres,
 and API status/method/latency. Total variation distance greater than 0.30 flags
 strong drift; fewer than 50 source observations is inconclusive and blocks updates,
 as does a schema failure rate above 10%. Data preparation runs these checks before

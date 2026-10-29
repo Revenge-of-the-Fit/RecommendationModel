@@ -132,6 +132,12 @@ def compare(reference, current):
         distances[source] = {}
         for feature in before["features"].keys() | after["features"].keys():
             left, right = before["features"].get(feature, {}), after["features"].get(feature, {})
+            if source == "kafka" and feature == "event_type":
+                # Watch rows are buffered and replaced per user/movie. Their retained
+                # share is not a stream frequency, especially during consumer replay.
+                left = {key: value for key, value in left.items() if key != "watch"}
+                right = {key: value for key, value in right.items() if key != "watch"}
+                feature = "event_type_non_watch"
             left_total, right_total = sum(left.values()), sum(right.values())
             if min(left_total, right_total) < MIN_SAMPLES:
                 distances[source][feature] = None
