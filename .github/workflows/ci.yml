@@ -1,0 +1,92 @@
+name: CI
+
+# Builds and tests only: no deployment, no production credentials, no model training.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Infrastructure tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      # tests/conftest.py installs a guard that fails any test reaching a host outside the runner or
+      # creating a real Kafka client, so this job cannot reach Kafka, the course APIs or an LLM provider.
+      - name: Run tests with coverage
+        shell: bash
+        run: |
+          mkdir -p reports
+          python -m pytest \
+            --junitxml=reports/junit.xml \
+            --cov --cov-report=xml:reports/coverage.xml --cov-report=html:reports/htmlcov \
+            --cov-report=term 2>&1 | tee reports/pytest.log
+
+      - name: Summarize results
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Test results"
+            echo
+            echo '```'
+            tail -n 1 reports/pytest.log
+            echo '```'
+            if [ -f .coverage ]; then
+              echo
+              echo "## Coverage (line and branch; files at 100% omitted)"
+              echo
+              python -m coverage report --format=markdown --skip-covered
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            reports/junit.xml
+            reports/pytest.log
+          if-no-files-found: warn
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            reports/htmlcov
+            reports/coverage.xml
+          if-no-files-found: warn
+
+  image:
+    name: Build service image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the service image
+        run: docker build --tag recommendation-service:ci .
+
+      - name: Validate the deployment configuration
+        run: docker compose --profile '*' -f compose.yaml config --quiet --no-interpolate
