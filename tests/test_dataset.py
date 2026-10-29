@@ -9,7 +9,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from dataset import MovieDataset
+from dataset import DatasetError, MovieDataset
 from sample_data import sample_events, sample_movies, sample_users, write_sample_data
 
 
@@ -81,7 +81,7 @@ class DatasetValidationTests(unittest.TestCase):
         self.addCleanup(self._directory.cleanup)
         self.directory = Path(self._directory.name)
 
-    def assertRejected(self, message, exception=ValueError, **tables):
+    def assertRejected(self, message, exception=DatasetError, **tables):
         write_sample_data(self.directory, **tables)
         with self.assertRaisesRegex(exception, message):
             MovieDataset(self.directory)
@@ -90,6 +90,9 @@ class DatasetValidationTests(unittest.TestCase):
         events = sample_events()
         events.loc[0, list(changes)] = list(changes.values())
         return events
+
+    def test_dataset_errors_remain_value_errors_for_existing_callers(self):
+        self.assertTrue(issubclass(DatasetError, ValueError))
 
     def test_missing_file(self):
         with self.assertRaisesRegex(FileNotFoundError, "download_data"):
@@ -109,7 +112,14 @@ class DatasetValidationTests(unittest.TestCase):
         nonpositive = users.copy()
         nonpositive.loc[0, "user_id"] = "0"
         self.assertRejected("User IDs must be positive", users=nonpositive, events=sample_events().iloc[1:])
-        self.assertRejected("invalid literal", users=users.assign(user_id=["one", *users["user_id"][1:]]))
+        self.assertRejected(
+            "users.csv.gz has invalid values in column user_id",
+            users=users.assign(user_id=["one", *users["user_id"][1:]]),
+        )
+        self.assertRejected(
+            "users.csv.gz has invalid values in column user_id",
+            users=users.assign(user_id=["9" * 30, *users["user_id"][1:]]),
+        )
 
     def test_movie_problems(self):
         movies = sample_movies()
@@ -124,7 +134,10 @@ class DatasetValidationTests(unittest.TestCase):
         self.assertRejected("movies missing", events=self.with_event(movie_id="zzz"))
 
     def test_unparseable_timestamps(self):
-        self.assertRejected("ISO8601", events=self.with_event(timestamp="yesterday"))
+        self.assertRejected(
+            "events.csv.gz has invalid values in column timestamp",
+            events=self.with_event(timestamp="yesterday"),
+        )
 
     def test_rating_problems(self):
         for bad in ["0", "11", "-3"]:
@@ -136,7 +149,7 @@ class DatasetValidationTests(unittest.TestCase):
         events.loc[1, "rating"] = ""
         self.assertRejected("between 1 and 10", events=events)
         events.loc[1, "rating"] = "great"
-        self.assertRejected("Unable to parse", events=events)
+        self.assertRejected("events.csv.gz has invalid values in column rating", events=events)
 
     def test_ratings_only_belong_on_rating_events(self):
         self.assertRejected("Only rating events", events=self.with_event(rating="5"))
