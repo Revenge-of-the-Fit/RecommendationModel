@@ -137,7 +137,7 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    command: ["python", "scripts/storage_maintenance.py"]
+    command: ["python", "scripts/storage_maintenance.py", "--no-backups"]
     environment:
       <<: *storage-environment
       ARCHIVE_DIRECTORY: /app/state/archives

@@ -175,13 +175,24 @@ checkpoint the original and retain it under a rollback filename before installin
 the compact copy. Preserve its ownership. Never discard an uncheckpointed WAL.
 Do not start schema-6 containers against the compact database.
 
-Maintenance checks capacity/checkpoints every 60 seconds between backups.
-Backup no longer runs
+Compose runs maintenance with `--no-backups`. Capacity checks and WAL checkpoints
+continue every 60 seconds, but automatic backups and their temporary database
+copies are disabled. Backups are not required by the M2 rubric. The live database,
+model artifacts and training/evaluation history remain in their existing volumes.
+Previously created backups are not deleted automatically. Stop maintenance before
+removing backup files from the separate `event_archives` volume. Do not remove
+the live database or its WAL/SHM files in `event_logs`.
+
+The optional backup implementation no longer runs
 integrity scans against the live database or holds its source transaction while
 validating/compressing the copy. Verification runs on the isolated copy; incremental
 copying holds a fixed read snapshot so concurrent writes do not restart it, with
 a ten-minute time budget. A failed backup preserves previous archives
-and is retried later. Compose defaults to two verified backups within 24 GiB.
+and is retried later when backups are enabled. The configured rotation limits are
+two verified backups within 24 GiB. These apply after rotation, not to the full-size
+temporary database copy and new compressed file created during a backup. To opt
+back into automatic backups, remove `--no-backups` from the maintenance command
+and recreate that service.
 Verification and compression of a large isolated copy can take much longer than
 the ten-minute live-copy budget. Inspect `storage_backup` log entries for the
 result; temporary `.observations-*` files belong to the active backup. Retain the
@@ -425,14 +436,14 @@ training, retaining a report on success and preserving the deployed model on
 failure. [Tests](tests/test_data_quality.py) cover malformed and supported inputs,
 normal variation, deliberate large shifts in every source, insufficient coverage,
 bounded reads and released SQLite snapshots. Production samples and references
-stay outside Git. On 2026-10-29 at 06:14–06:21 UTC, checks before and after a
+stay outside Git. On 2026-10-29 at 06:14â€“06:21 UTC, checks before and after a
 production model update passed for 5,000 Kafka records, 5,000 request logs and
 100 records from each metadata API, with no observed schema failures. The
 largest drift distance was 0.10787, below 0.30, against the unchanged reference.
 The training export retained its passing report at
 `/app/models/updates/20261029T061410Z-1965682/data/data-quality.json`.
-The verified new model (`673e4103…`) returned 20 recommendations in 24.387 ms.
-Three additional localhost requests completed in 2.731–23.331 ms; zero,
+The verified new model (`673e4103â€¦`) returned 20 recommendations in 24.387 ms.
+Three additional localhost requests completed in 2.731â€“23.331 ms; zero,
 nonnumeric and out-of-range user IDs returned 422. These timings exclude
 course-to-VM network latency. The offline suite passed 380 tests and 320 subtests
 with 89% overall coverage, including deliberate drift and malformed-data cases.
