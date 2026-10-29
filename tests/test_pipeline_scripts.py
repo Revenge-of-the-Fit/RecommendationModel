@@ -18,7 +18,7 @@ import prepare_data
 import recommend
 import train
 from recommender import EaseRecommender
-from sample_data import sample_events, write_sample_data
+from sample_data import sample_events, sample_users, write_sample_data
 
 
 def run_main(module, *arguments):
@@ -170,26 +170,41 @@ class PipelineScriptTests(unittest.TestCase):
             )
         return (*result, cold_class.return_value.recommend)
 
+    def cold_users(self):
+        """User IDs prepare_cold_start visits, in users.csv.gz order, and who has a description."""
+        model = EaseRecommender.load(self.model_path)
+        users = sample_users()
+        users = users[~users["user_id"].astype(int).map(model.has_positive_history)]
+        described = users[users["self_description_likes"].ne("") | users["self_description_dislikes"].ne("")]
+        return users["user_id"].tolist(), described["user_id"].tolist()
+
     def test_prepare_cold_start_only_calls_provider_for_described_users(self):
         code, out, _, recommend_call = self.run_prepare_cold_start()
+        visited, described = self.cold_users()
         self.assertEqual(code, 0)
-        recommend_call.assert_called_once()
+        # User 4 has only a below-threshold rating, so they count as cold but have no description
+        self.assertIn("4", visited)
+        self.assertEqual(recommend_call.call_count, len(described))
         self.assertEqual(recommend_call.call_args.args[:2], ("quiet dramas", "gore"))
-        self.assertIn("User 1002: no description; popularity fallback", out)
-        # User 4 only gave a below-threshold rating, so counts as cold but has no description
-        self.assertIn("User 4: no description; popularity fallback", out)
+        for user in visited:
+            if user not in described:
+                self.assertIn(f"User {user}: no description; popularity fallback", out)
         self.assertNotIn("User 1:", out)
-        self.assertIn("Generated: 1; reused from cache: 0", out)
+        self.assertIn(f"Generated: {len(described)}; reused from cache: 0", out)
 
     def test_prepare_cold_start_counts_cache_hits(self):
         _, out, _, _ = self.run_prepare_cold_start(cached=True)
-        self.assertIn("Generated: 0; reused from cache: 1", out)
+        _, described = self.cold_users()
+        self.assertIn(f"Generated: 0; reused from cache: {len(described)}", out)
 
     def test_prepare_cold_start_limit_caps_the_number_of_users(self):
-        # Users without positive history, in file order: 4, 1001, 1002
         _, out, _, recommend_call = self.run_prepare_cold_start("--limit", "2")
-        recommend_call.assert_called_once()
-        self.assertNotIn("User 1002", out)
+        visited, described = self.cold_users()
+        kept = visited[:2]
+        self.assertEqual(recommend_call.call_count, len([user for user in kept if user in described]))
+        for user in visited[2:]:
+            self.assertNotIn(f"User {user}:", out)
+        self.assertGreater(len(visited), 2)
 
     def test_prepare_cold_start_rejects_invalid_options(self):
         self.train_model()

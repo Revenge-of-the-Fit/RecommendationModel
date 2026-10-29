@@ -236,7 +236,7 @@ class EvaluationTests(unittest.TestCase):
         movies = pd.DataFrame(
             {"movie_id": [f"movie-{number}" for number in range(10)], "title": "Movie"}
         )
-        dataset = dataset or SimpleNamespace(
+        dataset = dataset if dataset is not None else SimpleNamespace(
             movies=movies,
             get_interactions=lambda: self.interactions,
             get_cold_start_users=lambda: [1001, 1002],
@@ -284,11 +284,12 @@ class EvaluationTests(unittest.TestCase):
             {"training": len(training), "validation": len(validation), "test": len(test)},
         )
         self.assertEqual(set(saved["data_sha256"]), {"events.csv.gz", "users.csv.gz", "movies.csv.gz"})
-        # The last two fits (selected model and baseline) are the final test-time fits
+        # No fit at any stage may contain a test pair, whatever order main() fits in
         test_pairs = set(zip(test["user_id"], test["movie_id"]))
-        for final in fits[-2:]:
-            self.assertEqual(len(final), len(training) + len(validation))
-            self.assertTrue(test_pairs.isdisjoint(zip(final["user_id"], final["movie_id"])))
+        for fit in fits:
+            self.assertTrue(test_pairs.isdisjoint(zip(fit["user_id"], fit["movie_id"])))
+        # The final test-time fit must exist and use training plus validation
+        self.assertIn(len(training) + len(validation), [len(fit) for fit in fits])
 
     def test_invalid_split_fractions_exit_with_an_error(self):
         code, saved, _, error = self.run_evaluate("--validation-fraction", "0.9", "--test-fraction", "0.9")
