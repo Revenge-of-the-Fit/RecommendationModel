@@ -9,3 +9,6 @@ data/
 .pytest_cache/
 .idea/
 .vscode/
+.coverage
+coverage.xml
+htmlcov/
