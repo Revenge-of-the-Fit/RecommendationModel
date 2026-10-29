@@ -6,6 +6,10 @@ import pandas as pd
 DATA_DIRECTORY = Path(__file__).resolve().parents[1] / "data"
 
 
+class DatasetError(ValueError):
+    """The course data is missing, malformed, or inconsistent."""
+
+
 class MovieDataset:
     """Load the course data and combine watch and rating events."""
 
@@ -24,16 +28,34 @@ class MovieDataset:
             ["movie_id", "title", "genres", "overview", "runtime", "license_cost"],
         )
 
-        self.events["user_id"] = self.events["user_id"].astype("int64")
-        self.users["user_id"] = self.users["user_id"].astype("int64")
-        self.events["timestamp"] = pd.to_datetime(
-            self.events["timestamp"], format="ISO8601", errors="raise", utc=True
+        self.events["user_id"] = self._convert(
+            "events.csv.gz", "user_id", lambda: self.events["user_id"].astype("int64")
         )
-        self.events["rating"] = pd.to_numeric(
-            self.events["rating"].replace("", pd.NA), errors="raise"
-        ).astype("Int64")
+        self.users["user_id"] = self._convert(
+            "users.csv.gz", "user_id", lambda: self.users["user_id"].astype("int64")
+        )
+        self.events["timestamp"] = self._convert(
+            "events.csv.gz", "timestamp",
+            lambda: pd.to_datetime(
+                self.events["timestamp"], format="ISO8601", errors="raise", utc=True
+            ),
+        )
+        self.events["rating"] = self._convert(
+            "events.csv.gz", "rating",
+            lambda: pd.to_numeric(
+                self.events["rating"].replace("", pd.NA), errors="raise"
+            ).astype("Int64"),
+        )
 
         self._validate()
+
+    @staticmethod
+    def _convert(filename: str, column: str, convert):
+        # Report bad values in our own words instead of the parsing library's
+        try:
+            return convert()
+        except (ValueError, TypeError, OverflowError) as error:
+            raise DatasetError(f"{filename} has invalid values in column {column}") from error
 
     def _read_table(self, filename: str, required_columns: list[str]) -> pd.DataFrame:
         path = self.data_directory / filename
@@ -49,53 +71,53 @@ class MovieDataset:
 
         if missing_columns:
             columns = ", ".join(sorted(missing_columns))
-            raise ValueError(f"{filename} is missing columns: {columns}")
+            raise DatasetError(f"{filename} is missing columns: {columns}")
 
         if table.empty:
-            raise ValueError(f"{filename} contains no rows")
+            raise DatasetError(f"{filename} contains no rows")
 
         return table
 
     def _validate(self) -> None:
         if self.users["user_id"].duplicated().any():
-            raise ValueError("User IDs must be unique")
+            raise DatasetError("User IDs must be unique")
 
         if (self.users["user_id"] <= 0).any():
-            raise ValueError("User IDs must be positive")
+            raise DatasetError("User IDs must be positive")
 
         if self.movies["movie_id"].eq("").any():
-            raise ValueError("Movie IDs cannot be empty")
+            raise DatasetError("Movie IDs cannot be empty")
 
         if self.movies["movie_id"].duplicated().any():
-            raise ValueError("Movie IDs must be unique")
+            raise DatasetError("Movie IDs must be unique")
 
         if self.events["timestamp"].isna().any():
-            raise ValueError("Events must have timestamps")
+            raise DatasetError("Events must have timestamps")
 
         valid_types = ["watch", "rating", "account_created"]
 
         if not self.events["event_type"].isin(valid_types).all():
-            raise ValueError("Events contain an unsupported event type")
+            raise DatasetError("Events contain an unsupported event type")
 
         if not self.events["user_id"].isin(self.users["user_id"]).all():
-            raise ValueError("Events refer to users missing from users.csv.gz")
+            raise DatasetError("Events refer to users missing from users.csv.gz")
 
         movie_events = self.events["event_type"].isin(["watch", "rating"])
 
         if not self.events.loc[movie_events, "movie_id"].isin(self.movies["movie_id"]).all():
-            raise ValueError("Events refer to movies missing from movies.csv.gz")
+            raise DatasetError("Events refer to movies missing from movies.csv.gz")
 
         rating_events = self.events["event_type"].eq("rating")
         ratings = self.events.loc[rating_events, "rating"]
 
         if ratings.isna().any() or not ratings.between(1, 10).all():
-            raise ValueError("Ratings must be integers between 1 and 10")
+            raise DatasetError("Ratings must be integers between 1 and 10")
 
         if self.events.loc[~rating_events, "rating"].notna().any():
-            raise ValueError("Only rating events may contain ratings")
+            raise DatasetError("Only rating events may contain ratings")
 
         if self.events.loc[~movie_events, "movie_id"].ne("").any():
-            raise ValueError("Account creation events cannot contain movies")
+            raise DatasetError("Account creation events cannot contain movies")
 
     def get_interactions(self, events: pd.DataFrame | None = None) -> pd.DataFrame:
         if events is None:

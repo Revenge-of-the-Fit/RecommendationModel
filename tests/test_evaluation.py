@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from evaluation import InteractionSplitter, RankingEvaluator
 from evaluate import main, select_model
+from recommender import EaseRecommender
 
 
 class FixedRecommender:
@@ -230,6 +231,71 @@ class EvaluationTests(unittest.TestCase):
         self.assertEqual(len(evaluated_parts), 4)
         for held_out in evaluated_parts:
             pd.testing.assert_frame_equal(held_out, validation)
+
+    def run_evaluate(self, *extra, dataset=None):
+        movies = pd.DataFrame(
+            {"movie_id": [f"movie-{number}" for number in range(10)], "title": "Movie"}
+        )
+        dataset = dataset if dataset is not None else SimpleNamespace(
+            movies=movies,
+            get_interactions=lambda: self.interactions,
+            get_cold_start_users=lambda: [1001, 1002],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            data_directory = Path(directory)
+            output = data_directory / "nested" / "evaluation.json"
+            for filename in ["events.csv.gz", "users.csv.gz", "movies.csv.gz"]:
+                (data_directory / filename).write_bytes(b"fixture")
+            arguments = [
+                "evaluate.py", "--regularizations", "100", "--min-ratings", "6", "7",
+                "--data-dir", str(data_directory), "--output", str(output), *extra,
+            ]
+            fits = []
+            original_fit = EaseRecommender.fit
+
+            def record_fit(model, interactions, catalog):
+                fits.append(interactions.copy())
+                return original_fit(model, interactions, catalog)
+
+            stderr = io.StringIO()
+            code = 0
+            with patch("sys.argv", arguments), patch("evaluate.MovieDataset", return_value=dataset):
+                with patch.object(EaseRecommender, "fit", record_fit):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                        try:
+                            main()
+                        except SystemExit as stop:
+                            code = stop.code
+            saved = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
+        return code, saved, fits, stderr.getvalue()
+
+    def test_final_test_evaluation_trains_on_train_and_validation_only(self):
+        code, saved, fits, _ = self.run_evaluate()
+        training, validation, test = InteractionSplitter().split(self.interactions)
+
+        self.assertEqual(code, 0)
+        self.assertTrue(saved["test_evaluated"])
+        self.assertEqual(saved["test_training_data"], "training and validation interactions")
+        for key in ["test_popularity", "test_baseline", "test_model"]:
+            self.assertIn("ndcg_at_k", saved[key])
+        self.assertEqual(saved["cold_start_users_not_evaluated"], 2)
+        self.assertEqual(
+            saved["interaction_counts"],
+            {"training": len(training), "validation": len(validation), "test": len(test)},
+        )
+        self.assertEqual(set(saved["data_sha256"]), {"events.csv.gz", "users.csv.gz", "movies.csv.gz"})
+        # No fit at any stage may contain a test pair, whatever order main() fits in
+        test_pairs = set(zip(test["user_id"], test["movie_id"]))
+        for fit in fits:
+            self.assertTrue(test_pairs.isdisjoint(zip(fit["user_id"], fit["movie_id"])))
+        # The final test-time fit must exist and use training plus validation
+        self.assertIn(len(training) + len(validation), [len(fit) for fit in fits])
+
+    def test_invalid_split_fractions_exit_with_an_error(self):
+        code, saved, _, error = self.run_evaluate("--validation-fraction", "0.9", "--test-fraction", "0.9")
+        self.assertEqual(code, 1)
+        self.assertIsNone(saved)
+        self.assertIn("Error:", error)
 
     def test_no_relevant_ratings_are_rejected(self):
         held_out = pd.DataFrame(
