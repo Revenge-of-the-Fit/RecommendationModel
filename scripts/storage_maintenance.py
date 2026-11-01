@@ -36,6 +36,7 @@ def positive_float(value):
 def run_maintenance(
     path, archive_directory, *, retain=2, min_free_bytes=0,
     max_database_bytes=None, max_archive_bytes=None, interval_hours=24, once=False, stop_event=None,
+    backups_enabled=True,
 ):
     stopped = stop_event if stop_event is not None else threading.Event()
     completed = 0
@@ -46,10 +47,11 @@ def run_maintenance(
         status = capacity_status(
             path, min_free_bytes=min_free_bytes, max_database_bytes=max_database_bytes,
         )
-        print(json.dumps({"operation": "storage_check", **status, "checkpoint": checkpoint}, sort_keys=True), flush=True)
+        print(json.dumps({"operation": "storage_check", **status, "checkpoint": checkpoint,
+                          "backups_enabled": backups_enabled}, sort_keys=True), flush=True)
         if not status["healthy"]:
             raise RuntimeError("Storage health or capacity check failed")
-        if time.monotonic() >= next_backup:
+        if backups_enabled and time.monotonic() >= next_backup:
             try:
                 manifest = backup_database(
                     path, archive_directory, retain=retain, min_free_bytes=min_free_bytes,
@@ -81,6 +83,8 @@ def main(argv=None):
     parser.add_argument("--max-database-bytes", type=positive_int, default=os.environ.get("STORAGE_MAX_DATABASE_BYTES", "17179869184") or None)
     parser.add_argument("--max-archive-bytes", type=positive_int, default=os.environ.get("STORAGE_MAX_ARCHIVE_BYTES", "25769803776") or None)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--backups", action=argparse.BooleanOptionalAction, default=True,
+                        help="Create backups as well as checking storage. Use --no-backups to disable.")
     arguments = parser.parse_args(argv)
     stopped = threading.Event()
     previous_handlers = {}
@@ -96,7 +100,7 @@ def main(argv=None):
             max_database_bytes=arguments.max_database_bytes,
             max_archive_bytes=arguments.max_archive_bytes,
             interval_hours=arguments.interval_hours, once=arguments.once,
-            stop_event=stopped,
+            stop_event=stopped, backups_enabled=arguments.backups,
         )
         return 0
     except Exception as error:

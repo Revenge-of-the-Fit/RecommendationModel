@@ -16,6 +16,7 @@ import pandas as pd
 
 from dataset import MovieDataset
 from recommender import EaseRecommender
+from check_data_quality import check_recent_quality
 
 
 def utc(value):
@@ -39,7 +40,7 @@ def write_jsonl(path, rows):
 
 
 def prepare_recent_data(storage_path, catalog_directory, model_path, output, *,
-                        start, end, max_events=200000, max_users=5000, max_movies=2000):
+                        start, end, max_events=200000, max_users=5000, max_movies=2000, quality_reference=None):
     if start.utcoffset() is None or end.utcoffset() is None or start >= end:
         raise ValueError("Choose an increasing timezone-aware data window")
     start, end = start.astimezone(timezone.utc), end.astimezone(timezone.utc)
@@ -50,6 +51,12 @@ def prepare_recent_data(storage_path, catalog_directory, model_path, output, *,
         raise ValueError("Dataset output must be a new directory")
     if not storage_path.is_file():
         raise FileNotFoundError("Production event database is missing")
+    quality = None
+    if quality_reference is not None:
+        quality = check_recent_quality(storage_path, catalog_directory, quality_reference, start=start, end=end,
+                                       base_url=os.environ.get("METADATA_BASE_URL", "http://128.2.24.239:8080"))
+        if quality["status"] != "passed":
+            raise ValueError("Data quality rejected this update: " + json.dumps(quality["findings"]))
     # Fix the candidate pool before looking at recent outcomes. Bound EASE's dense arrays.
     reference_hash = sha256(model_path)
     reference = EaseRecommender.load(model_path)
@@ -149,6 +156,8 @@ def prepare_recent_data(storage_path, catalog_directory, model_path, output, *,
         dataset = MovieDataset(stage)  # Reuse existing schema/referential/rating checks.
         write_jsonl(stage / "kafka_events.jsonl.gz", source_events)
         write_jsonl(stage / "llm_usage.jsonl.gz", usage)
+        if quality is not None:
+            (stage / "data-quality.json").write_text(json.dumps(quality, indent=2) + "\n", encoding="utf-8")
         report = {
             "window_start_inclusive": start.isoformat(), "window_end_exclusive": end.isoformat(),
             "actual_training_start": events.timestamp.min(), "actual_training_end": events.timestamp.max(),
@@ -178,6 +187,7 @@ def main():
     parser.add_argument("--max-events", type=int, default=200000)
     parser.add_argument("--max-users", type=int, default=5000)
     parser.add_argument("--max-movies", type=int, default=2000)
+    parser.add_argument("--quality-reference", type=Path, default=os.environ.get("DATA_QUALITY_REFERENCE"))
     args = parser.parse_args()
     if not math.isfinite(args.hours) or args.hours <= 0:
         parser.error("Hours must be positive and finite")
@@ -185,7 +195,8 @@ def main():
         end = utc(args.end) if args.end else datetime.now(timezone.utc)
         report = prepare_recent_data(args.storage_path, args.catalog_dir, args.model_path, args.output,
                                      start=end - timedelta(hours=args.hours), end=end,
-                                     max_events=args.max_events, max_users=args.max_users, max_movies=args.max_movies)
+                                     max_events=args.max_events, max_users=args.max_users, max_movies=args.max_movies,
+                                     quality_reference=args.quality_reference)
     except (ValueError, OSError, sqlite3.Error) as error:
         parser.exit(1, f"Preparation failed ({type(error).__name__}): {error}\n")
     print(json.dumps({"data_directory": str(args.output), **report}, indent=2))

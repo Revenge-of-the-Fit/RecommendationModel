@@ -30,7 +30,7 @@ class EventParserTests(unittest.TestCase):
     def test_watch_is_an_observed_minute(self):
         parsed = parse_event(event_value("GET /data/m/movie_name+2026/17.mpg"))
         self.assertEqual(parsed["parse_status"], "parsed")
-        self.assertEqual(parsed["parser_version"], 1)
+        self.assertEqual(parsed["parser_version"], 2)
         self.assertIsNone(parsed["error_type"])
         self.assertEqual(parsed["event_type"], "watch")
         self.assertEqual(parsed["user_id"], 42)

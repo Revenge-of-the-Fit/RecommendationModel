@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Callable
 from uuid import uuid4
 
+from data_quality import validate_metadata
 from storage.metadata import MetadataStore, normalize_entity_id, prepare_metadata_record
 
 
@@ -138,6 +139,12 @@ class MetadataCollector:
                         error_type = "HttpError" if http_status is not None else "MissingHttpStatus"
                     else:
                         records = self._records(entity_type, requested, batch)
+                        for entity_id, record in list(records.items()):
+                            try:
+                                validate_metadata(entity_type, record)
+                            except ValueError:
+                                del records[entity_id]
+                                error_type = "ValueError"
             except Exception as error:
                 error_type = type(error).__name__
                 records = {}

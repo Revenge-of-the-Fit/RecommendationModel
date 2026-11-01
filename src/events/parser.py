@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 WATCH = re.compile(r"GET /data/m/(?P<movie_id>[^/\s?#]+)/(?P<minute>[+-]?[0-9]+)\.mpg")
 RATING = re.compile(r"GET /rate/(?P<movie_id>[^/\s?#=]+)=(?P<rating>[+-]?[0-9]+)")
 RECOMMENDATION = re.compile(
@@ -180,6 +180,8 @@ def parse_event(value: bytes | None, event_timezone: str | None = None) -> dict:
     if result["user_id"] is None:
         user_error = "InvalidUserID"
     result["event_type"], result["movie_id"], result["fields"], body_error = _body(body)
+    if result["movie_id"] is not None and MOVIE_ID.fullmatch(result["movie_id"]) is None:
+        body_error = "InvalidMovieID"
     if body.startswith("GET "):
         result["fields"]["body"] = body
         try:

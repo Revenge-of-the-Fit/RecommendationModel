@@ -67,6 +67,31 @@ class StorageMaintenanceTests(unittest.TestCase):
         self.assertFalse(json.loads(output.getvalue())["healthy"])
         self.assertEqual(json.loads(errors.getvalue())["status"], "failed")
 
+    def test_disabling_backups_keeps_capacity_and_checkpoint_checks(self):
+        output = io.StringIO()
+        with patch.object(storage_maintenance, "Path") as wal, \
+                patch.object(storage_maintenance, "checkpoint_database") as checkpoint, \
+                patch.object(storage_maintenance, "capacity_status", return_value={"healthy": True}) as capacity, \
+                patch.object(storage_maintenance, "backup_database") as backup, redirect_stdout(output):
+            wal.return_value.exists.return_value = True
+            wal.return_value.stat.return_value.st_size = 65 * 1024**2
+            checkpoint.return_value = {"busy": False}
+            self.assertEqual(storage_maintenance.run_maintenance(
+                self.path, self.archives, once=True, backups_enabled=False,
+            ), 0)
+        checkpoint.assert_called_once_with(self.path)
+        capacity.assert_called_once()
+        backup.assert_not_called()
+        report = json.loads(output.getvalue())
+        self.assertTrue(report["healthy"])
+        self.assertFalse(report["backups_enabled"])
+        self.assertEqual(report["checkpoint"], {"busy": False})
+
+    def test_no_backups_flag_reaches_maintenance_loop(self):
+        with patch.object(storage_maintenance, "run_maintenance") as run:
+            self.assertEqual(storage_maintenance.main(self.arguments("--once", "--no-backups")), 0)
+        self.assertFalse(run.call_args.kwargs["backups_enabled"])
+
     def test_backup_failure_is_visible_without_printing_exception_payload(self):
         errors = io.StringIO()
         with patch.object(storage_maintenance, "capacity_status", return_value={"healthy": True}), \
@@ -171,6 +196,7 @@ class ContainerStorageTests(unittest.TestCase):
 
     def test_archives_survive_recreation_and_diagnostics_are_compressed_and_bounded(self):
         maintenance = self.configuration["services"]["storage-maintenance"]
+        self.assertIn("--no-backups", maintenance["command"])
         mount = next(item for item in maintenance["volumes"] if item["target"] == "/app/state/archives")
         self.assertEqual((mount["type"], mount["source"]), ("volume", "event_archives"))
         for name, service in self.configuration["services"].items():
