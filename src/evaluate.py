@@ -7,7 +7,7 @@ import pandas as pd
 
 from dataset import DATA_DIRECTORY, MovieDataset
 from evaluation import InteractionSplitter, RankingEvaluator
-from recommender import MODEL_PATH, EaseRecommender
+from recommender import DEFAULT_MIN_RATING, DEFAULT_REGULARIZATION, MODEL_PATH, EaseRecommender
 
 
 def print_metrics(label: str, metrics: dict, top_k: int) -> None:
@@ -66,6 +66,36 @@ def select_model(
     return best, results
 
 
+def evaluate_fixed_parameters(
+    training: pd.DataFrame,
+    validation: pd.DataFrame,
+    test: pd.DataFrame,
+    movies: pd.DataFrame,
+    evaluator: RankingEvaluator,
+    regularization: float,
+    min_rating: int,
+) -> dict:
+    # Parameters are already fixed, so validation rows can join training without selection.
+    model = EaseRecommender(regularization, min_rating)
+    model.fit(pd.concat([training, validation], ignore_index=True), movies)
+    metrics = evaluator.evaluate(model, test)
+    print_metrics("Test EASE (fixed parameters)", metrics, evaluator.top_k)
+    return {
+        "evaluation_mode": "fixed_parameters",
+        "model_parameters": {"regularization": regularization, "min_rating": min_rating},
+        "selection_rule": "Parameters fixed before evaluation; no tuning or model comparison",
+        "test_evaluated": True,
+        "test_training_data": "training and validation interactions",
+        "test_model": metrics,
+    }
+
+
+def save_result(output: Path, result: dict) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    print(f"Evaluation saved to {output.resolve()}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate and tune the movie recommender.")
     parser.add_argument("--data-dir", type=Path, default=DATA_DIRECTORY)
@@ -74,19 +104,34 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--relevance-rating", type=int, default=7)
     parser.add_argument(
-        "--min-ratings", "--min-rating", type=int, nargs="+", default=[6, 7, 8],
+        "--min-ratings", "--min-rating", type=int, nargs="+",
         help="Training thresholds to compare; held-out relevance stays fixed.",
     )
     parser.add_argument("--validation-fraction", type=float, default=0.2)
     parser.add_argument("--test-fraction", type=float, default=0.2)
     parser.add_argument(
-        "--regularizations", type=float, nargs="+", default=[1, 10, 25, 50, 100, 250, 500]
+        "--regularizations", type=float, nargs="+",
     )
     parser.add_argument(
         "--validation-only", action="store_true",
         help="Select parameters without fitting or evaluating on the final test split.",
     )
+    parser.add_argument(
+        "--fixed-parameters", action="store_true",
+        help="Evaluate once without tuning; defaults to the production EASE parameters.",
+    )
     arguments = parser.parse_args()
+
+    if arguments.fixed_parameters:
+        if arguments.validation_only:
+            parser.error("--fixed-parameters cannot be combined with --validation-only")
+        arguments.regularizations = arguments.regularizations or [DEFAULT_REGULARIZATION]
+        arguments.min_ratings = arguments.min_ratings or [DEFAULT_MIN_RATING]
+        if len(arguments.regularizations) != 1 or len(arguments.min_ratings) != 1:
+            parser.error("--fixed-parameters requires exactly one regularization and minimum rating")
+    else:
+        arguments.regularizations = arguments.regularizations or [1, 10, 25, 50, 100, 250, 500]
+        arguments.min_ratings = arguments.min_ratings or [6, 7, 8]
 
     try:
         splitter = InteractionSplitter(
@@ -100,6 +145,33 @@ def main() -> None:
             f"validation={len(validation):,}, test={len(test):,}",
             flush=True,
         )
+
+        file_hashes = {}
+        for filename in ["events.csv.gz", "users.csv.gz", "movies.csv.gz"]:
+            with (arguments.data_dir / filename).open("rb") as data_file:
+                file_hashes[filename] = hashlib.file_digest(data_file, "sha256").hexdigest()
+
+        result = {
+            "split_method": "seeded random holdout within each user, grouped by user/movie",
+            "seed": arguments.seed,
+            "validation_fraction": arguments.validation_fraction,
+            "test_fraction": arguments.test_fraction,
+            "interaction_counts": {
+                "training": len(training), "validation": len(validation), "test": len(test),
+            },
+            "cold_start_users_not_evaluated": len(dataset.get_cold_start_users()),
+            "top_k": arguments.top_k,
+            "relevance_rating": arguments.relevance_rating,
+            "data_sha256": file_hashes,
+        }
+
+        if arguments.fixed_parameters:
+            result.update(evaluate_fixed_parameters(
+                training, validation, test, dataset.movies, evaluator,
+                arguments.regularizations[0], arguments.min_ratings[0],
+            ))
+            save_result(arguments.output, result)
+            return
 
         baseline = EaseRecommender(regularization=100, min_rating=7)
         baseline.fit(training, dataset.movies)
@@ -120,24 +192,7 @@ def main() -> None:
             flush=True,
         )
 
-        file_hashes = {}
-        for filename in ["events.csv.gz", "users.csv.gz", "movies.csv.gz"]:
-            with (arguments.data_dir / filename).open("rb") as data_file:
-                file_hashes[filename] = hashlib.file_digest(data_file, "sha256").hexdigest()
-
-        result = {
-            "split_method": "seeded random holdout within each user, grouped by user/movie",
-            "seed": arguments.seed,
-            "validation_fraction": arguments.validation_fraction,
-            "test_fraction": arguments.test_fraction,
-            "interaction_counts": {
-                "training": len(training),
-                "validation": len(validation),
-                "test": len(test),
-            },
-            "cold_start_users_not_evaluated": len(dataset.get_cold_start_users()),
-            "top_k": arguments.top_k,
-            "relevance_rating": arguments.relevance_rating,
+        result.update({
             "selection_rule": (
                 "validation NDCG, then recall, then higher regularization, then higher training threshold"
             ),
@@ -148,8 +203,7 @@ def main() -> None:
             "selected_regularization": selected_regularization,
             "selected_min_rating": selected_min_rating,
             "test_evaluated": False,
-            "data_sha256": file_hashes,
-        }
+        })
 
         # Use the test split only after parameter selection
         if not arguments.validation_only:
@@ -173,14 +227,10 @@ def main() -> None:
                 }
             )
 
-        arguments.output.parent.mkdir(parents=True, exist_ok=True)
-        arguments.output.write_text(
-            json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8"
-        )
+        save_result(arguments.output, result)
     except (FileNotFoundError, ValueError) as error:
         parser.exit(1, f"Error: {error}\n")
 
-    print(f"Evaluation saved to {arguments.output.resolve()}")
     print(
         f"Train on all interactions with --regularization {selected_regularization:g} "
         f"--min-rating {selected_min_rating}"
