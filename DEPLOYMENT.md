@@ -335,8 +335,8 @@ use `gpt-6-luna`, default tier, non-batch; output, cache-read and cache-write
 counts are zero. The operator confirms this is a Decisions endpoint export;
 its `api_source` column is unlabeled. At the published standard Decisions
 rate checked November 8, 2026, `1,115,057 / 1,000,000 * USD 0.10` gives
-**USD 0.1115057**. The rate and application/provider count difference are
-documented in the report. Provider totals already include billed retries;
+**USD 0.1115057**. The pricing source is linked in the report.
+Provider totals already include billed retries;
 do not add application attempt totals again. Neither production data, usage
 exports nor generated results belong in Git.
 

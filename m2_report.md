@@ -72,9 +72,6 @@ counts are zero. **Operationalization:** Sum the buckets starting at or after
 [OpenAI Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability),
 checked **November 8, 2026**, charges USD 0.10 per million uncached input
 tokens and does not charge output tokens. This uses published standard rates.
-The provider export has one fewer request and 881 fewer input tokens than
-the application snapshot. The source of this small difference is unverified;
-the two sources are reported separately and their costs are not added.
 
 **Limitations:** Capped exports and latest-position watch retention omit history.
 No observed watch does not prove inactivity; later positions can continue an
