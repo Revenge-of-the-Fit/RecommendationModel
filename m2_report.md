@@ -1,8 +1,38 @@
+## Automated model updates
+
+A manually triggered [shell script](scripts/update_model.sh)
+exports a bounded recent production sample with [preparation](src/prepare_recent_data.py),
+validates it with `MovieDataset`, and runs the existing EASE [trainer](src/train.py)
+with unchanged hyperparameters. It saves and [validates a candidate](src/model_update.py)
+before replacing the model in the persistent volume and restarting the API through
+Compose. Preparation/training/validation failures preserve the current artifact;
+one previous artifact is retained. The deployment check verifies a successful
+response was served with the candidate's fingerprint.
+
+The VM run of source `fe91403` on October 28, 2026 completed the full command.
+Its requested window was the previous 24 hours, bounded to 200,000 retained
+events. The selected training events spanned **02:32:40–05:09:30 UTC on October 28**:
+13,619 events, 8,253 user/movie pairs, 5,000 users and 2,000 movies. EASE training
+took 1.63 seconds with regularization 100 and minimum positive rating 6.
+API startup took about six minutes, including the existing profile-cache checks.
+
+| Deployment evidence | Result |
+| --- | --- |
+| Previous model SHA-256 | `6036093ce0cd94cb5aa6848696cdb3bcf1fc8eee617725cebc0488874231f9a7` |
+| Updated model SHA-256 | `47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6` |
+| Verified request | `047b792476f24a76ba8cd4b76d54f032`: HTTP 200, 20 recommendations, 28.052 ms over localhost; saved request version matched the updated fingerprint. |
+
+The script finished with `status: deployed`. API and storage health checks passed;
+all 190 accepted request logs had been written, with zero failed or rejected writes
+at that check. The snapshot manifest and raw run log remain on the VM, outside Git.
+
 ## Offline evaluation
 
 We checked the recommender by hiding some recorded movie history, training on the rest, and seeing whether it recommended movies the users had liked.
 
 **Metric:** We used NDCG@10, a score from 0 to 1 for the top ten recommendations. Higher is better. A hidden movie counts as relevant when the user rated it at least 7. Finding it near the top earns more credit.
+
+NDCG suits this problem because both finding liked movies and placing them near the top matter.
 
 Each match adds `1 / log2(position + 1)` to the user's score. We divide by the best possible total for that user's relevant movies, up to ten, then average across users. Missed movies earn no credit.
 
@@ -33,6 +63,7 @@ includes responses without observed watches; conditional HitRate considers only
 responses with any observed watch in that hour.
 
 **Data:** The saved October 29 `movielog2` export contains 200,000 retained events.
+It includes user/movie IDs, timestamps, recommendation lists and watch positions.
 We evaluated successful responses from our server during **03:15–05:00 UTC**,
 with observations through **06:00 UTC**. The snapshot records reference model
 SHA-256 `47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6`;
@@ -73,6 +104,9 @@ counts are zero. **Operationalization:** Sum the buckets starting at or after
 checked **November 8, 2026**, charges USD 0.10 per million uncached input
 tokens and does not charge output tokens. This uses published standard rates.
 
+The [USD calculation](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32)
+is manual; we do not add provider totals to application tokens.
+
 **Limitations:** Capped exports and latest-position watch retention omit history.
 No observed watch does not prove inactivity; later positions can continue an
 earlier viewing. Repeated viewing sessions cannot be reconstructed.
@@ -85,3 +119,91 @@ billing.
 and [CI workflow](.github/workflows/ci.yml).
 All 34 evaluator tests pass with 95% line/branch coverage; the full local suite
 passes 481 tests with 89% overall coverage.
+
+## Data quality
+
+We reuse Kafka and recommendation API
+schemas and add shared user/movie metadata field validation, preserving supported
+missing values and cold-start fallback. [Production checks](src/check_data_quality.py)
+compare bounded retained Kafka/request samples and fixed cohorts of 100 live
+user/movie API records against an explicit production reference. Histograms cover
+schema validity, non-watch event mix and ratings, user age/descriptions, movie runtime/cost/genres,
+and API status/method/latency. Total variation distance greater than 0.30 flags
+strong drift; fewer than 50 source observations is inconclusive and blocks updates,
+as does a schema failure rate above 10%. Data preparation runs these checks before
+training, retaining a report on success and preserving the deployed model on
+failure. [Tests](tests/test_data_quality.py) cover malformed and supported inputs,
+normal variation, deliberate large shifts in every source, insufficient coverage,
+bounded reads and released SQLite snapshots. Production samples and references
+stay outside Git. On 2026-10-29 at 06:14–06:21 UTC, checks before and after a
+production model update passed for 5,000 Kafka records, 5,000 request logs and
+100 records from each metadata API, with no observed schema failures. The
+largest drift distance was 0.10787, below 0.30, against the unchanged reference.
+The training export retained its passing report at
+`/app/models/updates/20261029T061410Z-1965682/data/data-quality.json`.
+The verified new model (`673e4103…`) returned 20 recommendations in 24.387 ms.
+Three additional localhost requests completed in 2.731–23.331 ms; zero,
+nonnumeric and out-of-range user IDs returned 422. These timings exclude
+course-to-VM network latency. The offline suite passed 380 tests and 320 subtests
+with 89% overall coverage, including deliberate drift and malformed-data cases.
+
+Invalid Kafka/metadata records are audited/excluded; [invalid requests](src/api/routes.py) return 422.
+
+## Pipeline implementation and testing
+
+[Kafka ingestion](src/consume_events.py) and the
+[metadata client](src/services/metadata.py) persist observations in SQLite. Recent
+data preparation exports the existing three-table dataset format; the
+[dataset module](src/dataset.py) validates it and combines watches/ratings into
+user/movie interactions. [EASE](src/recommender.py) fits and serializes weights,
+and the update installer promotes the candidate. The
+[recommendation service](src/services/recommendation.py) loads the model and uses
+live history or the LLM cold-start path; [request logging](src/api/request_logging.py)
+records outputs and model versions for evaluation. Evaluation is separate from
+production fitting. The [update tests](tests/test_model_update.py) exercise sample
+boundaries, metadata cutoffs, training compatibility, failed promotion, loaded
+version verification and the shell script's failure behavior without production
+connections.
+
+Our current [tests](tests/) use small fixtures, temporary databases and fake
+providers. They cover dataset validation, ranking and splits, API logging,
+replay/deduplication, persistence, cold-start failures, model updates and online
+matching/costs. [Conftest](tests/conftest.py) installs a
+[network guard](tests/network_guard.py) that blocks external hosts and real Kafka
+clients. Tests run without production credentials or paid calls.
+
+Current [CI test results](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556):
+**481 tests pass**, with **89% overall line/branch coverage** and **95% online
+evaluator coverage**. The [coverage artifact](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556/artifacts/13605832755)
+contains HTML/XML per-file results. [Test suite](tests/).
+
+These tests check both normal and failure paths: invalid inputs must be rejected,
+held-out test pairs must not enter training, and failed model validation must
+not replace the running artifact. This gives us confidence in the handoffs
+between pipeline steps, not just the coverage percentage. Small fixtures do not
+prove production-scale accuracy or latency; those are checked separately.
+
+## Continuous integration
+
+The current [workflow](.github/workflows/ci.yml) runs on every push and pull request.
+Its infrastructure-test job uses Ubuntu and Python 3.12, installs
+`requirements-dev.txt`, and runs pytest with line/branch coverage.
+JUnit results, test logs and HTML/XML coverage are uploaded even when tests fail.
+The second job builds the Docker image and validates Compose. Neither job
+deploys or requires production credentials. Both jobs passed in the
+[November 8 main run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556)
+for implementation commit
+[`2fa0202`](https://github.com/Revenge-of-the-Fit/RecommendationModel/commit/2fa02024daf23432a1c9a8571cf841aaa538cf50).
+
+## Pull requests
+
+We split milestone work into focused branches and pull requests. A teammate
+reviews the code and results before we merge, and CI checks the proposed changes.
+Three examples with teammate approval are
+[data quality #35](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/35),
+[offline evaluation #37](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/37)
+and [online evaluation #38](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/38).
+
+## Team contract update
+
+no update to team contract
