@@ -325,7 +325,20 @@ percentages. Open `reports/online-evaluation.json` for counts, windows, input/mo
 provenance, limitations, licensing subtotal/coverage, and recorded LLM tokens.
 This snapshot gives **21.98% overall** and **64.88% conditional** HitRate@20;
 **66.11%** of responses have no observed follow-up watch.
-LLM USD is left blank. Neither production data nor generated results belong in Git.
+The evaluator leaves `cost.llm_usd` as `null`; the [report](m2_report.md#runtime-cost)
+calculates it manually from the provider usage export. In
+`decisions_usage_2026-10-29_2026-10-29.csv`, interpret timestamps as UTC and
+select the 105 one-minute buckets with start >= 2026-10-29 03:15:00 and
+start < 05:00:00 (all end by 05:00). Sum `num_model_requests` and
+`input_uncached_tokens`: **1,793 requests** and **1,115,057 tokens**. All rows
+use `gpt-6-luna`, default tier, non-batch; output, cache-read and cache-write
+counts are zero. The operator confirms this is a Decisions endpoint export;
+its `api_source` column is unlabeled. At the published standard Decisions
+rate checked November 8, 2026, `1,115,057 / 1,000,000 * USD 0.10` gives
+**USD 0.1115057**. The rate and application/provider count difference are
+documented in the report. Provider totals already include billed retries;
+do not add application attempt totals again. Neither production data, usage
+exports nor generated results belong in Git.
 
 ### M2 report contribution
 

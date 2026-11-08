@@ -401,7 +401,7 @@ def evaluate_snapshot(data_directory: Path, *, start: str, end: str,
             "Cached-input and cache-write tokens are subsets of input, not additional tokens.",
             "LLM totals describe recorded attempts started in the request window, not an uncapped billing total.",
             "Missing/invalid usage is unknown consumption; cache-detail gaps do not imply zero cached tokens.",
-            "LLM USD cost and pricing are intentionally deferred; null is not zero cost.",
+            "LLM USD is calculated manually from provider usage in m2_report.md; this evaluator leaves it null, not zero.",
         ],
     }
 

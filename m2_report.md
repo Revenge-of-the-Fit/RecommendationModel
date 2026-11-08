@@ -61,7 +61,20 @@ tokens**, **0 output tokens**, and **0 cached-input/cache-write tokens**.
 Deduplicate by attempt ID; distinct retries and failed attempts with usage count
 once each. Application profile reuse adds no provider attempt. Missing usage
 is unknown, not zero; all selected attempts have usage.
-**LLM USD estimate and pricing source/date: pending teammate contribution.**
+
+**LLM cost metric:** Estimated USD for provider-recorded Decisions usage in the
+same window. **Data:** The supplied October 29 minute-level provider export
+contains 105 complete one-minute buckets, **1,793 requests** and **1,115,057
+uncached input tokens** for `gpt-6-luna` on the default tier. Output and cache
+counts are zero. **Operationalization:** Sum the buckets starting at or after
+03:15 and before 05:00 UTC, then calculate
+`1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057` (about **USD 0.112**).
+[OpenAI Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability),
+checked **November 8, 2026**, charges USD 0.10 per million uncached input
+tokens and does not charge output tokens. This uses published standard rates.
+The provider export has one fewer request and 881 fewer input tokens than
+the application snapshot. The source of this small difference is unverified;
+the two sources are reported separately and their costs are not added.
 
 **Limitations:** Capped exports and latest-position watch retention omit history.
 No observed watch does not prove inactivity; later positions can continue an
