@@ -291,6 +291,55 @@ recreate the API; the candidate/export remain available for inspection. Run
 directories are not automatically expired; retain the run used for the M2 results
 and remove unneeded older run directories when they are no longer in use.
 
+### Read-only online accuracy and cost evaluation (issue #32)
+
+- **HitRate@20:** Percentage of recommendation responses where the user later
+  watches any movie in the top 20 within one hour. No observed watch counts as a miss.
+- **Conditional HitRate@20:** The same hits, considering only responses with
+  any observed watch within that hour. It is `null` if nobody has an observed watch.
+
+Both match the same user and exact movie ID, strictly after the response and
+before one hour elapses. Duplicate records and minute chunks do not add hits.
+These are observed-watch proxies, not proof that recommendations caused watching.
+
+**Run:** From the repository root, use Python 3.12. On the VM, copy the existing
+snapshot into the ignored local data directory, then run the read-only evaluator:
+
+```bash
+mkdir -p data/m2-online-20261029
+for file in dataset-manifest.json kafka_events.jsonl.gz catalog.csv.gz llm_usage.jsonl.gz; do
+  docker cp "recommendationmodel-api-1:/app/models/updates/20261029T061410Z-1965682/data/$file" \
+    "data/m2-online-20261029/$file" || exit 1
+done
+
+python3 src/evaluate_online.py \
+  --data-dir data/m2-online-20261029 \
+  --start 2026-10-29T03:15:00Z --end 2026-10-29T05:00:00Z \
+  --observation-end 2026-10-29T06:00:00Z --follow-up-seconds 3600 \
+  --server cmu-online-mlip-vm02.andrew.cmu.edu:8082 \
+  --output reports/online-evaluation.json
+```
+
+**Results:** The command prints both rates as fractions; multiply by 100 for
+percentages. Open `reports/online-evaluation.json` for counts, windows, input/model
+provenance, limitations, licensing subtotal/coverage, and recorded LLM tokens.
+This snapshot gives **21.98% overall** and **64.88% conditional** HitRate@20;
+**66.11%** of responses have no observed follow-up watch.
+The evaluator leaves `cost.llm_usd` as `null`; the [report](m2_report.md#runtime-cost)
+calculates it manually from the provider usage export. In
+`decisions_usage_2026-10-29_2026-10-29.csv`, interpret timestamps as UTC and
+select the 105 one-minute buckets with start >= 2026-10-29 03:15:00 and
+start < 05:00:00 (all end by 05:00). Sum `num_model_requests` and
+`input_uncached_tokens`: **1,793 requests** and **1,115,057 tokens**. All rows
+use `gpt-6-luna`, default tier, non-batch; output, cache-read and cache-write
+counts are zero. The operator confirms this is a Decisions endpoint export;
+its `api_source` column is unlabeled. At the published standard Decisions
+rate checked November 8, 2026, `1,115,057 / 1,000,000 * USD 0.10` gives
+**USD 0.1115057**. The pricing source is linked in the report.
+Provider totals already include billed retries;
+do not add application attempt totals again. Neither production data, usage
+exports nor generated results belong in Git.
+
 ### M2 report contribution
 
 **Automated model updates:** A manually triggered [shell script](scripts/update_model.sh)
