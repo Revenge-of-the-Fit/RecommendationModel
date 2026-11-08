@@ -1,208 +1,74 @@
 ## Automated model updates
 
-A manually triggered [shell script](scripts/update_model.sh)
-exports a bounded recent production sample with [preparation](src/prepare_recent_data.py),
-validates it with `MovieDataset`, and runs the existing EASE [trainer](src/train.py)
-with unchanged hyperparameters. It saves and [validates a candidate](src/model_update.py)
-before replacing the model in the persistent volume and restarting the API through
-Compose. Preparation/training/validation failures preserve the current artifact;
-one previous artifact is retained. The deployment check verifies a successful
-response was served with the candidate's fingerprint.
+To start, we made it possible to retrain and deploy the model with one command, `sudo bash scripts/update_model.sh`, from `/home/production` on the VM. The [script](scripts/update_model.sh) gathers recent data through [preparation](src/prepare_recent_data.py), runs the data quality checks, and calls the existing [EASE trainer](src/train.py). The [installer](src/model_update.py) checks that the candidate loads before replacing the model and restarting the API. If preparation, training, or validation fails, the current model stays in place. We keep the previous model so that it can be restored if the new service fails to start. This approach accepts a short interruption while the API restarts.
 
-The VM run of source `fe91403` on October 28, 2026 completed the full command.
-Its requested window was the previous 24 hours, bounded to 200,000 retained
-events. The selected training events spanned **02:32:40–05:09:30 UTC on October 28**:
-13,619 events, 8,253 user/movie pairs, 5,000 users and 2,000 movies. EASE training
-took 1.63 seconds with regularization 100 and minimum positive rating 6.
-API startup took about six minutes, including the existing profile-cache checks.
-
-| Deployment evidence | Result |
-| --- | --- |
-| Previous model SHA-256 | `6036093ce0cd94cb5aa6848696cdb3bcf1fc8eee617725cebc0488874231f9a7` |
-| Updated model SHA-256 | `47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6` |
-| Verified request | `047b792476f24a76ba8cd4b76d54f032`: HTTP 200, 20 recommendations, 28.052 ms over localhost; saved request version matched the updated fingerprint. |
-
-The script finished with `status: deployed`. API and storage health checks passed;
-all 190 accepted request logs had been written, with zero failed or rejected writes
-at that check. The snapshot manifest and raw run log remain on the VM, outside Git.
+On October 28, 2026, the script successfully trained and deployed a model using 13,619 production events from 02:32:40 to 05:09:30 UTC. These were a selected subset of the requested previous 24 hours. The model fingerprint changed from `6036093c...` to `47a2b22f...`. The deployment check then received HTTP 200 with 20 recommendations in 28.052 ms over localhost, and the saved request's model fingerprint matched the new artifact. The [deployment results](DEPLOYMENT.md#m2-report-contribution) include the full fingerprints and run details.
 
 ## Offline evaluation
 
-We checked the recommender by hiding some recorded movie history, training on the rest, and seeing whether it recommended movies the users had liked.
+We evaluated the model by hiding some recorded history and checking whether it recommended movies that the users had liked.
 
-**Metric:** We used NDCG@10, a score from 0 to 1 for the top ten recommendations. Higher is better. A hidden movie counts as relevant when the user rated it at least 7. Finding it near the top earns more credit.
+**Metric:** We used NDCG@10 because both finding a movie that somebody likes and placing it near the top matter. A hidden movie is relevant if its rating is at least 7 out of 10. Each relevant recommendation contributes `1 / log2(position + 1)`. We divide this sum by the best possible sum for that user's relevant movies, up to ten, then average across users. The score ranges from 0 to 1.
 
-NDCG suits this problem because both finding liked movies and placing them near the top matter.
+**Data:** We used the October 28 `movielog2` export, containing 13,619 events, 5,000 users, and 2,000 movies. The selected events span 02:32:40 to 05:09:30 UTC. We combined each user's watches and latest rating for a movie into one sample so that the same user/movie pair could not enter both training and testing.
 
-Each match adds `1 / log2(position + 1)` to the user's score. We divide by the best possible total for that user's relevant movies, up to ten, then average across users. Missed movies earn no credit.
+**Operationalization:** We sorted samples by user/movie, then shuffled each user's samples using one NumPy `default_rng(42)`. For users with at least three samples, we reserved 20% for validation and another 20% for testing, rounding down but keeping at least one sample in each. Users with fewer than three samples stayed in training. Since regularization 100 and minimum positive rating 6 were already fixed, we combined training and validation and fit EASE once on 8,101 samples. The 152 test samples were not used to choose parameters.
 
-**Data:** We used the saved October 28 `movielog2` export: 13,619 events, 5,000 users, and 2,000 movies. The selected events span 02:32:40–05:09:30 UTC on October 28.
-This is a selected subset of the requested 24 hours. We checked that the copied files matched the saved export.
+We learned model weights, user profiles, and popularity from training data only. Recommendations excluded training-history movies. Ties used training popularity, then movie ID. Relevant test movies that the model could not recommend still counted toward the score. [Run instructions](OFFLINE_EVALUATION.md#run), [evaluation command](src/evaluate.py), [split and metric implementation](src/evaluation.py), and [data preparation](src/dataset.py).
 
-**Operationalization (how we ran it):** We combined each person's watches and latest rating for one movie into one sample. Keeping these records together prevents the same sample from entering both training and testing.
-
-We reused the existing split: sort samples by user/movie, then shuffle each user's samples with one NumPy `default_rng(42)`. For users with at least three samples, reserve two groups of 20%, rounding down but keeping at least one in each. The second group is the test set. We combine the first group with the remaining training data because the model settings are already fixed. Users with fewer than three samples stay in training.
-
-We trained a fresh EASE model once on 8,101 samples, keeping 152 samples for testing. Production settings stayed at regularization 100 and minimum positive rating 6. We learned weights, user profiles, and popularity only from training data. Recommendations exclude movies already in the user's training history. Ties use training popularity, then movie ID. Relevant test movies the model cannot recommend still count toward the score.
-
-[Run instructions](OFFLINE_EVALUATION.md#run), [evaluation command](src/evaluate.py),
-[split and scoring](src/evaluation.py), and [data preparation](src/dataset.py).
-
-**Result:** On November 3, 2026, NDCG@10 was 0.170877 across 45 users.
-Of the 5,000 users, 4,848 had too little history for a test sample. Of the remaining 152, another 107 had no hidden movie rated at least 7, leaving 45 we could score. Each had one highly rated hidden movie: it appeared in the top ten for 16 users, and was missing for 29. Its position determined how much NDCG credit it earned.
-
-**Limits:** Only 45 users qualified, so this is a small sample. The export favors active users and movies selected using the previous model's popularity, capped at 200,000 source records, 5,000 users, and 2,000 movies. Users and movies repeat across the training and test groups. This check measures existing-user preferences; future traffic and the LLM cold-start path need separate evaluation.
+On November 3, NDCG@10 was **0.170877 across 45 users**. Of the 5,000 users, 4,848 had too little history for a test sample, and another 107 had no relevant test rating. This leaves a small sample. In addition, the export favors active users and movies selected using the previous model's popularity. Users and movies intentionally repeat across splits because we are checking existing-user preferences. This random holdout does not measure future traffic or cold-start accuracy.
 
 ## Online evaluation
 
 ### Accuracy
 
-**Metrics:** Subsequent-watch HitRate@20 counts a response as a hit if the same
-user has any recorded watch of a top-20 movie within one hour. Overall HitRate
-includes responses without observed watches; conditional HitRate considers only
-responses with any observed watch in that hour.
+**Metric:** We used subsequent-watch HitRate@20 to check whether recommendations matched what people later watched. A response is a hit if the same user watches any recommended movie within one hour. Responses without an observed watch count as misses. We also measured the hit rate among only responses with an observed watch.
 
-**Data:** The saved October 29 `movielog2` export contains 200,000 retained events.
-It includes user/movie IDs, timestamps, recommendation lists and watch positions.
-We evaluated successful responses from our server during **03:15–05:00 UTC**,
-with observations through **06:00 UTC**. The snapshot records reference model
-SHA-256 `47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6`;
-it does not verify the model served for each response.
+**Data:** The October 29 export contains 200,000 retained Kafka events, including user/movie IDs, timestamps, recommendation lists, and watches. We evaluated successful responses from our server from **03:15 UTC inclusive to 05:00 UTC exclusive**, with observations through 06:00 UTC. The manifest identifies reference model `47a2b22f...`, but does not verify the model served for every request.
 
-**Operationalization and results:** Match exact user/movie IDs at strictly later
-timestamps, before one hour elapses. Duplicate source records and identical
-user/time/ranked-slate responses count once; minute chunks do not increase hits.
-Each response has the full follow-up duration inside both partitions' observed
-time spans. **7,553 / 34,357 responses hit: 21.98% overall.**
-Among **11,642 responses with observed watching**, **64.88%** hit.
-The other **22,715 responses (66.11%)** have no observed watch.
-Conditional HitRate is undefined if no response has observed watching.
+**Operationalization:** We matched exact user/movie IDs at strictly later times, before one hour elapsed. Duplicate source records and identical user/time/ranked-list responses counted once. Each response had its full follow-up inside both partitions' observed time spans. **7,553 of 34,357 responses hit, or 21.98%.** Among the **11,642 responses with observed watching**, the hit rate was **64.88%**.
 
 ### Runtime cost
 
-**Metric, data and operationalization:** Sum saved catalog `license_cost` fees
-once per distinct observed user/movie pair during **03:15–05:00 UTC**, including
-unmatched watches. Minute chunks and repeated viewings of the same pair are not
-separate units. Of **51,578 units**, **41,966 (81.36%)** have fees, totaling
-**USD 13,783.43**. The **9,612 units** lacking catalog metadata have unknown cost,
-so this is a covered-unit subtotal, not a complete licensing total.
+**Licensing metric:** USD for observed user/movie pairs. These approximate views because the retained data does not identify viewing sessions. **Data:** Watches in the same window and saved catalog `license_cost` fees. **Operationalization:** We summed the fee once per distinct pair, including watches without a recommendation match. Minute chunks and repeated views of the same pair did not add fees. **41,966 of 51,578 pairs** had fees, totaling **USD 13,783.43**. The other **9,612** had unknown cost.
 
-For the same window, **1,794 exported LLM attempts** recorded **1,115,938 input
-tokens**, **0 output tokens**, and **0 cached-input/cache-write tokens**.
-Deduplicate by attempt ID; distinct retries and failed attempts with usage count
-once each. Application profile reuse adds no provider attempt. Missing usage
-is unknown, not zero; all selected attempts have usage.
+**LLM metric:** Token consumption and estimated USD. **Data:** The provider's 105 minute buckets for the same window recorded **1,793 Decisions requests**, **1,115,057 uncached input tokens**, and zero output or cache tokens for `gpt-6-luna` on the default tier. **Operationalization:** We summed the buckets once and calculated `1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057`. This uses [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability), checked November 8, 2026. Output tokens are not charged.
 
-**LLM cost metric:** Estimated USD for provider-recorded Decisions usage in the
-same window. **Data:** The supplied October 29 minute-level provider export
-contains 105 complete one-minute buckets, **1,793 requests** and **1,115,057
-uncached input tokens** for `gpt-6-luna` on the default tier. Output and cache
-counts are zero. **Operationalization:** Sum the buckets starting at or after
-03:15 and before 05:00 UTC, then calculate
-`1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057` (about **USD 0.112**).
-[OpenAI Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability),
-checked **November 8, 2026**, charges USD 0.10 per million uncached input
-tokens and does not charge output tokens. This uses published standard rates.
+The [online evaluator](src/evaluate_online.py) deduplicates attempt IDs and counts distinct retries and failed attempts with usage once each. Reusing a prepared profile adds no provider call. Missing usage is unknown, not zero. We do not add application totals to provider totals. [Matching/cost tests](tests/test_online_evaluation.py); [run and manual pricing instructions](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32).
 
-The [USD calculation](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32)
-is manual; we do not add provider totals to application tokens.
-
-**Limitations:** Capped exports and latest-position watch retention omit history.
-No observed watch does not prove inactivity; later positions can continue an
-earlier viewing. Repeated viewing sessions cannot be reconstructed.
-One watch may match multiple responses, so neither accuracy nor licensing
-establishes causal attribution. LLM totals cover recorded attempts, not uncapped
-billing.
-
-[Evaluator](src/evaluate_online.py), [matching/cost tests](tests/test_online_evaluation.py),
-[run/results instructions](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32),
-and [CI workflow](.github/workflows/ci.yml).
-All 34 evaluator tests pass with 95% line/branch coverage; the full local suite
-passes 481 tests with 89% overall coverage.
+The retained events omit history, so these results describe the saved sample. One watch can match multiple responses, and a later movie position can continue an earlier viewing. The accuracy measure does not establish causation, and the licensing subtotal misses unknown fees and separate repeated viewings.
 
 ## Data quality
 
-We reuse Kafka and recommendation API
-schemas and add shared user/movie metadata field validation, preserving supported
-missing values and cold-start fallback. [Production checks](src/check_data_quality.py)
-compare bounded retained Kafka/request samples and fixed cohorts of 100 live
-user/movie API records against an explicit production reference. Histograms cover
-schema validity, non-watch event mix and ratings, user age/descriptions, movie runtime/cost/genres,
-and API status/method/latency. Total variation distance greater than 0.30 flags
-strong drift; fewer than 50 source observations is inconclusive and blocks updates,
-as does a schema failure rate above 10%. Data preparation runs these checks before
-training, retaining a report on success and preserving the deployed model on
-failure. [Tests](tests/test_data_quality.py) cover malformed and supported inputs,
-normal variation, deliberate large shifts in every source, insufficient coverage,
-bounded reads and released SQLite snapshots. Production samples and references
-stay outside Git. On 2026-10-29 at 06:14–06:21 UTC, checks before and after a
-production model update passed for 5,000 Kafka records, 5,000 request logs and
-100 records from each metadata API, with no observed schema failures. The
-largest drift distance was 0.10787, below 0.30, against the unchanged reference.
-The training export retained its passing report at
-`/app/models/updates/20261029T061410Z-1965682/data/data-quality.json`.
-The verified new model (`673e4103…`) returned 20 recommendations in 24.387 ms.
-Three additional localhost requests completed in 2.731–23.331 ms; zero,
-nonnumeric and out-of-range user IDs returned 422. These timings exclude
-course-to-VM network latency. The offline suite passed 380 tests and 320 subtests
-with 89% overall coverage, including deliberate drift and malformed-data cases.
+We check schemas at the Kafka stream, user API, movie API, and recommendation API. Checks cover IDs, timestamps, ratings, metadata field types and ranges, and recommendation format. Supported missing metadata is allowed. Invalid Kafka or metadata records are audited and excluded, invalid requests return 422, and users without usable preferences follow the existing fallback.
 
-Invalid Kafka/metadata records are audited/excluded; [invalid requests](src/api/routes.py) return 422.
+Our [production checks](src/check_data_quality.py) compare a fixed reference with up to 5,000 Kafka records, 5,000 request logs, and 100 records from each metadata API. We compare schema validity, non-watch event types and ratings, user ages and description presence, movie genres/runtime/cost, and API status/method/latency. We exclude watch frequency because the database merges minute chunks. [Validation and drift implementation](src/data_quality.py).
+
+Strong drift means total variation distance, half the sum of absolute category-proportion differences, exceeds 0.30. Sources need 50 observations; features below 50 are unassessed. Insufficient source data or more than 10% invalid records also fails the check. Preparation blocks updates that fail, preserving the deployed model.
+
+On October 29, checks passed with no schema failures and a maximum drift distance of 0.10787. [Tests](tests/test_data_quality.py) cover valid and malformed inputs, strong shifts in all four sources, and insufficient data.
 
 ## Pipeline implementation and testing
 
-[Kafka ingestion](src/consume_events.py) and the
-[metadata client](src/services/metadata.py) persist observations in SQLite. Recent
-data preparation exports the existing three-table dataset format; the
-[dataset module](src/dataset.py) validates it and combines watches/ratings into
-user/movie interactions. [EASE](src/recommender.py) fits and serializes weights,
-and the update installer promotes the candidate. The
-[recommendation service](src/services/recommendation.py) loads the model and uses
-live history or the LLM cold-start path; [request logging](src/api/request_logging.py)
-records outputs and model versions for evaluation. Evaluation is separate from
-production fitting. The [update tests](tests/test_model_update.py) exercise sample
-boundaries, metadata cutoffs, training compatibility, failed promotion, loaded
-version verification and the shell script's failure behavior without production
-connections.
+We kept the pipeline in separate modules so that each step could be run and tested without having to run the entire service. [Kafka ingestion](src/consume_events.py) and the [metadata client](src/services/metadata.py) collect observations in SQLite. [Preparation](src/prepare_recent_data.py) exports recent data, and the [dataset module](src/dataset.py) validates it and combines watches and ratings into features. The [trainer](src/train.py) fits and saves [EASE](src/recommender.py), while the [installer](src/model_update.py) validates and promotes the artifact.
 
-Our current [tests](tests/) use small fixtures, temporary databases and fake
-providers. They cover dataset validation, ranking and splits, API logging,
-replay/deduplication, persistence, cold-start failures, model updates and online
-matching/costs. [Conftest](tests/conftest.py) installs a
-[network guard](tests/network_guard.py) that blocks external hosts and real Kafka
-clients. Tests run without production credentials or paid calls.
+The [recommendation service](src/services/recommendation.py) loads the model and uses the user's available history. For users without supported history, the [background worker](src/services/live_worker.py) prepares and saves a Decisions preference profile from their likes and dislikes for cold-start ranking. Slow or failed preparation leaves a valid fallback available. [Request logging](src/api/request_logging.py) records recommendations, serving methods, timings, and model versions. Offline and online evaluation run separately from production training.
 
-Current [CI test results](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556):
-**481 tests pass**, with **89% overall line/branch coverage** and **95% online
-evaluator coverage**. The [coverage artifact](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556/artifacts/13605832755)
-contains HTML/XML per-file results. [Test suite](tests/).
+Our [test suite](tests/) uses small fixtures, temporary databases, and fake providers. Tests cover collection/parsing, cleaning and features, training orchestration, evaluation splits and scoring, model serialization/loading, serving, cold start, and telemetry. They include malformed inputs, duplicate/replayed events, cache reuse, different preferences, slow or failed providers, and failed model updates. The [network guard](tests/network_guard.py), installed by [conftest](tests/conftest.py), blocks external hosts and real Kafka clients. Tests do not need course credentials, production APIs, or paid LLM calls.
 
-These tests check both normal and failure paths: invalid inputs must be rejected,
-held-out test pairs must not enter training, and failed model validation must
-not replace the running artifact. This gives us confidence in the handoffs
-between pipeline steps, not just the coverage percentage. Small fixtures do not
-prove production-scale accuracy or latency; those are checked separately.
+The [November 8 CI run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556) passed **481 tests with 89% overall line/branch coverage**. Its [coverage report](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556/artifacts/13605832755) contains HTML/XML results by file.
+
+These tests are appropriate because they check the transformations and connections between steps as well as failure handling. For example, held-out pairs cannot enter training, invalid records cannot silently become usable data, and failed candidate validation cannot replace the running model. The tests do not prove accuracy or latency at production scale, which require separate measurements.
 
 ## Continuous integration
 
-The current [workflow](.github/workflows/ci.yml) runs on every push and pull request.
-Its infrastructure-test job uses Ubuntu and Python 3.12, installs
-`requirements-dev.txt`, and runs pytest with line/branch coverage.
-JUnit results, test logs and HTML/XML coverage are uploaded even when tests fail.
-The second job builds the Docker image and validates Compose. Neither job
-deploys or requires production credentials. Both jobs passed in the
-[November 8 main run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556)
-for implementation commit
-[`2fa0202`](https://github.com/Revenge-of-the-Fit/RecommendationModel/commit/2fa02024daf23432a1c9a8571cf841aaa538cf50).
+We use [GitHub Actions](.github/workflows/ci.yml) to run the infrastructure tests on every push and pull request. The test job runs on Ubuntu with Python 3.12, installs [development dependencies](requirements-dev.txt), and runs pytest with line/branch coverage. It uploads JUnit results, test logs, and HTML/XML coverage reports even when tests fail.
+
+In addition, a second job builds the service's Docker image and validates the Compose configuration. The workflow does not deploy to the VM or run production training. This allows us to check proposed changes without giving CI production access. Both jobs passed in the [November 8 run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556) for implementation commit [`2fa0202`](https://github.com/Revenge-of-the-Fit/RecommendationModel/commit/2fa02024daf23432a1c9a8571cf841aaa538cf50).
 
 ## Pull requests
 
-We split milestone work into focused branches and pull requests. A teammate
-reviews the code and results before we merge, and CI checks the proposed changes.
-Three examples with teammate approval are
-[data quality #35](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/35),
-[offline evaluation #37](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/37)
-and [online evaluation #38](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/38).
+We used branches and pull requests to divide the work. Another teammate reviewed the changes before merging, and CI checked the proposed implementation. Three examples with teammate approval are [data quality #35](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/35), [offline evaluation #37](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/37), and [online evaluation #38](https://github.com/Revenge-of-the-Fit/RecommendationModel/pull/38).
 
 ## Team contract update
 
