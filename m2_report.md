@@ -30,9 +30,15 @@ The result was **NDCG@10 of 0.170877 across 45 users**. Of the 5,000 users, 4,84
 
 ### Runtime cost
 
-**Licensing metric:** Estimated USD for observed views using the collected movie fees. **Data:** Watches in the same window and a movie-fee export collected from the saved catalog and movie API. **Operationalization:** Count each distinct user/movie pair as one viewing. Multiply each movie's fee by its distinct observed viewers, then sum before rounding to cents. All **51,578 pairs** had fees, giving an estimated **USD 14,335.22**.
+**Licensing metric:** Estimated USD for observed views using the collected movie fees. **Data:** Watches in the same window and a movie-fee export collected from the saved catalog and movie API.
 
-**LLM metric:** Token consumption and estimated USD. **Data:** The provider's 105 minute buckets for the same window recorded **1,793 Decisions requests**, **1,115,057 uncached input tokens**, and zero output or cache tokens for `gpt-6-luna` on the default tier. **Operationalization:** We summed the buckets once and calculated `1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057`. This uses [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability). Output tokens are not charged.
+**Operationalization:** Count each distinct user/movie pair as one viewing. Multiply each movie's fee by its distinct observed viewers, then sum before rounding to cents. All **51,578 pairs** had fees, giving an estimated **USD 14,335.22**.
+
+**LLM metric:** Token consumption and estimated USD.
+
+**Data:** The provider's 105 minute buckets for the same window recorded **1,793 Decisions requests**, **1,115,057 uncached input tokens**, and zero output or cache tokens for `gpt-6-luna` on the default tier.
+
+**Operationalization:** We summed the buckets once and calculated `1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057`. This uses [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability). Output tokens are not charged.
 
 The [online evaluator](src/evaluate_online.py) deduplicates application attempt IDs; distinct retries and failed attempts with usage count once each. Reusing a prepared profile adds no provider call. [Matching/cost tests](tests/test_online_evaluation.py); [run instructions, fee sources and pricing details](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32).
 
