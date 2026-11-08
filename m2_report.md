@@ -16,7 +16,7 @@ We evaluated the model by hiding some recorded history and checking whether it r
 
 We learned model weights, user profiles, and popularity from training data only. Recommendations excluded training-history movies. Ties used training popularity, then movie ID. Relevant test movies that the model could not recommend still counted toward the score. [Run instructions](OFFLINE_EVALUATION.md#run), [evaluation command](src/evaluate.py), [split and metric implementation](src/evaluation.py), and [data preparation](src/dataset.py).
 
-On November 8, we reproduced **NDCG@10 of 0.170877 across 45 users**. Of the 5,000 users, 4,848 had too little history for a test sample, and another 107 had no relevant test rating. The score therefore describes those 45 qualifying users in the selected cohort. Users and movies intentionally repeat across splits because this evaluation measures preference ranking for users with recorded history. It is not a test of future traffic or new-user accuracy.
+The result was **NDCG@10 of 0.170877 across 45 users**. Of the 5,000 users, 4,848 had too little history for a test sample, and another 107 had no relevant test rating. The score therefore describes those 45 qualifying users in the selected cohort. Users and movies intentionally repeat across splits because this evaluation measures preference ranking for users with recorded history. It is not a test of future traffic or new-user accuracy.
 
 ## Online evaluation
 
@@ -30,11 +30,11 @@ On November 8, we reproduced **NDCG@10 of 0.170877 across 45 users**. Of the 5,0
 
 ### Runtime cost
 
-**Licensing metric:** Estimated USD for observed views. **Data:** Watches in the same window, saved catalog fees, and missing movie fees fetched from the movie API on November 8. **Operationalization:** Count each distinct user/movie pair as one viewing. Multiply each movie's fee by its distinct observed viewers, then sum before rounding to cents. All **51,578 pairs** have fees: **USD 13,783.43** from the saved catalog plus **USD 551.79** for the remaining 9,612 pairs, totaling **USD 14,335.22**. The recovered fees are November 8 prices applied to October 29 observations.
+**Licensing metric:** Estimated USD for observed views using the collected movie fees. **Data:** Watches in the same window and a movie-fee export collected from the saved catalog and movie API. **Operationalization:** Count each distinct user/movie pair as one viewing. Multiply each movie's fee by its distinct observed viewers, then sum before rounding to cents. All **51,578 pairs** had fees, giving an estimated **USD 14,335.22**.
 
-**LLM metric:** Token consumption and estimated USD. **Data:** The provider's 105 minute buckets for the same window recorded **1,793 Decisions requests**, **1,115,057 uncached input tokens**, and zero output or cache tokens for `gpt-6-luna` on the default tier. **Operationalization:** We summed the buckets once and calculated `1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057`. This uses [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability), checked November 8, 2026. Output tokens are not charged.
+**LLM metric:** Token consumption and estimated USD. **Data:** The provider's 105 minute buckets for the same window recorded **1,793 Decisions requests**, **1,115,057 uncached input tokens**, and zero output or cache tokens for `gpt-6-luna` on the default tier. **Operationalization:** We summed the buckets once and calculated `1,115,057 / 1,000,000 * USD 0.10 = USD 0.1115057`. This uses [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability). Output tokens are not charged.
 
-The [online evaluator](src/evaluate_online.py) deduplicates application attempt IDs; distinct retries and failed attempts with usage count once each. Reusing a prepared profile adds no provider call. [Matching/cost tests](tests/test_online_evaluation.py); [run, fee-recovery and pricing instructions](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32).
+The [online evaluator](src/evaluate_online.py) deduplicates application attempt IDs; distinct retries and failed attempts with usage count once each. Reusing a prepared profile adds no provider call. [Matching/cost tests](tests/test_online_evaluation.py); [run instructions, fee sources and pricing details](DEPLOYMENT.md#read-only-online-accuracy-and-cost-evaluation-issue-32).
 
 The database replaces older watches for the same user/movie pair. Our estimate therefore counts one view per retained pair, rather than separate replays or minute chunks. HitRate counts later watch observations, including continued viewings; one watch can match multiple earlier responses. These results describe the retained sample.
 
@@ -56,7 +56,7 @@ The [recommendation service](src/services/recommendation.py) loads the model and
 
 Our [test suite](tests/) uses small fixtures, temporary databases, and fake providers. Tests cover collection/parsing, cleaning and features, training orchestration, evaluation splits and scoring, model serialization/loading, serving, cold start, and telemetry. They include malformed inputs, duplicate/replayed events, cache reuse, different preferences, slow or failed providers, and failed model updates. The [network guard](tests/network_guard.py), installed by [conftest](tests/conftest.py), blocks external hosts and real Kafka clients. Tests do not need course credentials, production APIs, or paid LLM calls.
 
-The [November 8 CI run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556) passed **481 tests with 89% overall line/branch coverage**. Its [coverage report](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556/artifacts/13605832755) contains HTML/XML results by file.
+The [CI run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556) passed **481 tests with 89% overall line/branch coverage**. Its [coverage report](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556/artifacts/13605832755) contains HTML/XML results by file.
 
 These tests are appropriate because they check the transformations and connections between steps as well as failure handling. For example, held-out pairs cannot enter training, invalid records cannot silently become usable data, and failed candidate validation cannot replace the running model. Accuracy is measured separately using the recorded production data described above.
 
@@ -64,7 +64,7 @@ These tests are appropriate because they check the transformations and connectio
 
 We use [GitHub Actions](.github/workflows/ci.yml) to run the infrastructure tests on every push and pull request. The test job runs on Ubuntu with Python 3.12, installs [development dependencies](requirements-dev.txt), and runs pytest with line/branch coverage. It uploads JUnit results, test logs, and HTML/XML coverage reports even when tests fail.
 
-In addition, a second job builds the service's Docker image and validates the Compose configuration. The workflow does not deploy to the VM or run production training. This allows us to check proposed changes without giving CI production access. Both jobs passed in the [November 8 run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556).
+In addition, a second job builds the service's Docker image and validates the Compose configuration. The workflow does not deploy to the VM or run production training. This allows us to check proposed changes without giving CI production access. Both jobs passed in the [linked run](https://github.com/Revenge-of-the-Fit/RecommendationModel/actions/runs/42452393556).
 
 ## Pull requests
 

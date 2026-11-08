@@ -329,13 +329,14 @@ all **51,578** observed user/movie pairs. Each pair contributes one movie fee,
 including watches without a recommendation match. Minute chunks do not add fees;
 separate replays of the same pair are not separate units in this estimate.
 
-**Movie fees:** The original catalog priced 41,966 pairs at USD 13,783.4263170865.
-The November 8 audit used the existing [metadata API client](src/services/metadata_http.py)
-to retrieve missing fees for 6,453 distinct movies in 33 read-only requests, with
-up to 200 IDs per request and a one-second minimum interval. These fees priced the
-remaining 9,612 pairs at USD 551.7903363616. They were observed on November 8 and
-applied to October 29 watching; this does not assert that historical prices were
-unchanged. The CSV retains `fee_source` and `fee_observed_at` for each movie.
+**Movie fees:** The fee CSV combines saved catalog fees for 41,966 pairs
+(USD 13,783.4263170865) with movie API fees for 9,612 pairs
+(USD 551.7903363616). The existing [metadata API client](src/services/metadata_http.py)
+collected fees for 6,453 distinct movies in 33 read-only requests, with up to 200
+IDs per request and a one-second minimum interval. The API fees were collected
+on November 8 and applied to the October 29 watch sample. This is an estimate
+using the collected fees, not a historical billing total. The CSV retains
+`fee_source` and `fee_observed_at` for each movie.
 
 `--licensing-fees` reads `movie_id` and `license_cost_usd` from that CSV and
 recomputes viewer counts and costs from the watch export. It does not trust the
