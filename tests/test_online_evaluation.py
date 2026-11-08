@@ -473,6 +473,50 @@ class OnlineEvaluationTests(unittest.TestCase):
         self.assertEqual(json.loads(first)["hit_rate_at_20"], 0.5)
         self.assertEqual(json.loads(first)["conditional_hit_rate_at_20"], 1)
 
+    def test_fee_export_prices_missing_movies_and_recomputes_counts_without_changing_inputs(self):
+        self.rows.extend([
+            event(5, "04:01:00", "watch"),
+            event(6, "04:02:00", "watch", movie="extra"),
+            event(7, "04:03:00", "watch", movie="extra"),
+            event(8, "04:04:00", "watch", user=2, movie="extra"),
+        ])
+        self.save_snapshot()
+        before = {path.name: path.read_bytes() for path in self.directory.iterdir()}
+        fees = Path(self.temporary.name) / "licensing-breakdown.csv"
+        fees.write_text("movie_id,license_cost_usd,observed_user_movie_pairs,cost_usd\n"
+                        "movie-1,0.10,999,999\nextra,0.25,999,999\n", encoding="utf-8")
+        fee_bytes = fees.read_bytes()
+        output = Path(self.temporary.name) / "online.json"
+        argv = ["--data-dir", str(self.directory), "--output", str(output),
+                "--start", self.arguments["start"], "--end", self.arguments["end"],
+                "--observation-end", self.arguments["observation_end"], "--server", SERVER,
+                "--licensing-fees", str(fees)]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(main(argv), 0)
+        result = json.loads(output.read_text())
+        licensing = result["cost"]["licensing"]
+        self.assertEqual(licensing["observed_units"], 3)
+        self.assertEqual(licensing["covered_units"], 3)
+        self.assertEqual(result["cost"]["movie_licensing_usd"], 0.6)
+        self.assertEqual(licensing["fee_export"]["sha256"], hashlib.sha256(fee_bytes).hexdigest())
+        self.assertEqual(fees.read_bytes(), fee_bytes)
+        self.assertEqual({name: (self.directory / name).read_bytes() for name in before}, before)
+
+    def test_cli_refuses_to_overwrite_supplemental_fees(self):
+        fees = Path(self.temporary.name) / "fees.csv"
+        fees.write_text("movie_id,license_cost_usd\nmovie-1,0.10\n", encoding="utf-8")
+        before = fees.read_bytes()
+        argv = ["--data-dir", str(self.directory), "--output", str(fees),
+                "--start", self.arguments["start"], "--end", self.arguments["end"],
+                "--observation-end", self.arguments["observation_end"], "--server", SERVER,
+                "--licensing-fees", str(fees)]
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as failure:
+            main(argv)
+        self.assertEqual(failure.exception.code, 1)
+        self.assertIn("must not overwrite the licensing fee file", stderr.getvalue())
+        self.assertEqual(fees.read_bytes(), before)
+
     def test_cli_refuses_to_overwrite_inputs_and_surfaces_errors(self):
         self.save_snapshot()
         argv = [
