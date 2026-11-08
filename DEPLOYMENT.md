@@ -293,52 +293,70 @@ and remove unneeded older run directories when they are no longer in use.
 
 ### Read-only online accuracy and cost evaluation (issue #32)
 
-- **HitRate@20:** Percentage of recommendation responses where the user later
-  watches any movie in the top 20 within one hour. No observed watch counts as a miss.
-- **Conditional HitRate@20:** The same hits, considering only responses with
-  any observed watch within that hour. It is `null` if nobody has an observed watch.
+- **HitRate@20:** The fraction of successful recommendation responses with any
+  strictly later watch of a top-20 movie by the same user, before one hour elapses.
+  Responses with no observed watch count as misses.
+- **Conditional HitRate@20:** The same hits divided by the responses with any
+  observed watch during that hour. It is `null` if that denominator is zero.
 
-Both match the same user and exact movie ID, strictly after the response and
-before one hour elapses. Duplicate records and minute chunks do not add hits.
-These are observed-watch proxies, not proof that recommendations caused watching.
+The evaluator matches exact user/movie IDs. Duplicate source records and identical
+user/time/ranked-list responses count once. Both partitions must span the requested
+evaluation and follow-up periods. The saved watch table retains the latest record
+per user/movie pair, so this is a metric on the retained observations.
 
-**Run:** From the repository root, use Python 3.12. On the VM, copy the existing
-snapshot into the ignored local data directory, then run the read-only evaluator:
+**Reproduce the final results:** Use Python 3.12 with `requirements.txt` installed.
+The VM archive `/home/wblackwo/m2-report-check.tar.gz` contains the unchanged
+October 29 online export, the October 28 offline export, and the collected movie
+fee CSV. Copy that archive from the VM first if running on another machine.
+From the repository root on the VM:
 
 ```bash
-mkdir -p data/m2-online-20261029
-for file in dataset-manifest.json kafka_events.jsonl.gz catalog.csv.gz llm_usage.jsonl.gz; do
-  docker cp "recommendationmodel-api-1:/app/models/updates/20261029T061410Z-1965682/data/$file" \
-    "data/m2-online-20261029/$file" || exit 1
-done
+mkdir -p data
+tar -xzf /home/wblackwo/m2-report-check.tar.gz -C data
 
 python3 src/evaluate_online.py \
-  --data-dir data/m2-online-20261029 \
+  --data-dir data/m2-report-check/online \
+  --licensing-fees data/m2-report-check/licensing-breakdown.csv \
   --start 2026-10-29T03:15:00Z --end 2026-10-29T05:00:00Z \
   --observation-end 2026-10-29T06:00:00Z --follow-up-seconds 3600 \
   --server cmu-online-mlip-vm02.andrew.cmu.edu:8082 \
   --output reports/online-evaluation.json
 ```
 
-**Results:** The command prints both rates as fractions; multiply by 100 for
-percentages. Open `reports/online-evaluation.json` for counts, windows, input/model
-provenance, limitations, licensing subtotal/coverage, and recorded LLM tokens.
-This snapshot gives **21.98% overall** and **64.88% conditional** HitRate@20;
-**66.11%** of responses have no observed follow-up watch.
-The evaluator leaves `cost.llm_usd` as `null`; the [report](m2_report.md#runtime-cost)
-calculates it manually from the provider usage export. In
-`decisions_usage_2026-10-29_2026-10-29.csv`, interpret timestamps as UTC and
-select the 105 one-minute buckets with start >= 2026-10-29 03:15:00 and
-start < 05:00:00 (all end by 05:00). Sum `num_model_requests` and
-`input_uncached_tokens`: **1,793 requests** and **1,115,057 tokens**. All rows
-use `gpt-6-luna`, default tier, non-batch; output, cache-read and cache-write
-counts are zero. The operator confirms this is a Decisions endpoint export;
-its `api_source` column is unlabeled. At the published standard Decisions
-rate checked November 8, 2026, `1,115,057 / 1,000,000 * USD 0.10` gives
-**USD 0.1115057**. The pricing source is linked in the report.
-Provider totals already include billed retries;
-do not add application attempt totals again. Neither production data, usage
-exports nor generated results belong in Git.
+The output gives **21.98% overall** and **64.88% conditional** HitRate@20. Licensing
+cost is **USD 14,335.2166534481**, rounded once to **USD 14,335.22**, with fees for
+all **51,578** observed user/movie pairs. Each pair contributes one movie fee,
+including watches without a recommendation match. Minute chunks do not add fees;
+separate replays of the same pair are not separate units in this estimate.
+
+**Movie fees:** The original catalog priced 41,966 pairs at USD 13,783.4263170865.
+The November 8 audit used the existing [metadata API client](src/services/metadata_http.py)
+to retrieve missing fees for 6,453 distinct movies in 33 read-only requests, with
+up to 200 IDs per request and a one-second minimum interval. These fees priced the
+remaining 9,612 pairs at USD 551.7903363616. They were observed on November 8 and
+applied to October 29 watching; this does not assert that historical prices were
+unchanged. The CSV retains `fee_source` and `fee_observed_at` for each movie.
+
+`--licensing-fees` reads `movie_id` and `license_cost_usd` from that CSV and
+recomputes viewer counts and costs from the watch export. It does not trust the
+CSV's stored counts or subtotals. The result records the fee file's SHA-256, and
+the original snapshot files remain unchanged. Omitting this option reproduces
+the original catalog-only subtotal and its 81.36% fee coverage. Preserve the
+collected fee CSV to repeat the published estimate without new API requests.
+
+**LLM pricing:** The evaluator leaves `cost.llm_usd` as `null`; the report prices
+the provider export manually. In `decisions_usage_2026-10-29_2026-10-29.csv`, select
+the 105 UTC minute buckets starting at or after 03:15 and before 05:00. They
+contain 1,793 requests and 1,115,057 uncached input tokens, with zero output,
+cache-read or cache-write tokens. All use `gpt-6-luna`, default tier, non-batch.
+The operator confirms this is a Decisions export; `api_source` is unlabeled.
+At [standard Decisions pricing](https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability)
+checked November 8, 2026, `1,115,057 / 1,000,000 * USD 0.10` gives **USD 0.1115057**.
+Output tokens are not charged. Provider totals include reported retry usage;
+do not add application attempt totals again.
+
+Production exports, fee CSVs, usage exports and generated results stay outside Git.
+
 
 ### M2 report contribution
 

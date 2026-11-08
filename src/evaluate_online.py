@@ -40,18 +40,20 @@ def subsequent_hit(movies: tuple[str, ...], user_id: int, stamp: datetime,
     )
 
 
-def licensing_cost(path: Path, viewing_units: set[tuple[int, str]]) -> dict:
+def licensing_cost(path: Path, viewing_units: set[tuple[int, str]], *, fee_column="license_cost") -> dict:
     fees = {}
     invalid_fees = set()
-    with gzip.open(path, "rt", encoding="utf-8", newline="") as source:
+    path = Path(path)
+    opener = gzip.open if path.suffix == ".gz" else open
+    with opener(path, "rt", encoding="utf-8", newline="") as source:
         reader = csv.DictReader(source)
-        if not {"movie_id", "license_cost"}.issubset(reader.fieldnames or []):
-            raise ValueError("Catalog must contain movie_id and license_cost")
+        if not {"movie_id", fee_column}.issubset(reader.fieldnames or []):
+            raise ValueError(f"Catalog must contain movie_id and {fee_column}")
         for row in reader:
             movie_id = row["movie_id"]
             if not movie_id or movie_id in fees:
                 raise ValueError("Catalog movie IDs must be nonempty and unique")
-            raw_fee = row["license_cost"]
+            raw_fee = row[fee_column]
             fee = None
             if raw_fee and raw_fee.strip():
                 try:
@@ -180,7 +182,7 @@ def recorded_llm_usage(path: Path, *, start: datetime, end: datetime, manifest: 
 
 def evaluate_snapshot(data_directory: Path, *, start: str, end: str,
                       observation_end: str, server: str,
-                      follow_up_seconds: float = 3600) -> dict:
+                      follow_up_seconds: float = 3600, licensing_fees: Path | None = None) -> dict:
     start, end, observation_end = utc(start), utc(end), utc(observation_end)
     if not math.isfinite(follow_up_seconds) or follow_up_seconds <= 0:
         raise ValueError("Follow-up seconds must be positive and finite")
@@ -322,7 +324,11 @@ def evaluate_snapshot(data_directory: Path, *, start: str, end: str,
         subsequent_hit(movies, user_id, stamp, watch_index, follow_up)
         for user_id, stamp, movies in impressions
     )
-    licensing = licensing_cost(data_directory / "catalog.csv.gz", viewing_units)
+    fee_path = Path(licensing_fees) if licensing_fees is not None else data_directory / "catalog.csv.gz"
+    licensing = licensing_cost(fee_path, viewing_units,
+                               fee_column="license_cost_usd" if licensing_fees is not None else "license_cost")
+    if licensing_fees is not None:
+        licensing["fee_export"] = {"path": str(fee_path), "sha256": sha256(fee_path)}
     llm_usage = recorded_llm_usage(data_directory / "llm_usage.jsonl.gz", start=start, end=end, manifest=manifest)
     return {
         "metric": "subsequent-watch HitRate@20 (retained observations)",
@@ -413,15 +419,19 @@ def main(argv=None) -> int:
     parser.add_argument("--end", required=True, help="Exclusive recommendation-window end, with timezone")
     parser.add_argument("--observation-end", required=True, help="Exclusive observed-event cutoff, with timezone")
     parser.add_argument("--follow-up-seconds", type=float, default=3600)
+    parser.add_argument("--licensing-fees", type=Path,
+                        help="Optional per-movie CSV with movie_id and license_cost_usd; replaces saved catalog fees")
     parser.add_argument("--server", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.output.resolve().is_relative_to(args.data_dir.resolve()):
             raise ValueError("Output must be outside the read-only snapshot directory")
+        if args.licensing_fees is not None and args.output.resolve() == args.licensing_fees.resolve():
+            raise ValueError("Output must not overwrite the licensing fee file")
         result = evaluate_snapshot(
             args.data_dir, start=args.start, end=args.end, observation_end=args.observation_end,
-            follow_up_seconds=args.follow_up_seconds, server=args.server,
+            follow_up_seconds=args.follow_up_seconds, server=args.server, licensing_fees=args.licensing_fees,
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2, allow_nan=False) + "\n", encoding="utf-8")
