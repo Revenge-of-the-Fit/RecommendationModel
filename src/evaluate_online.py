@@ -40,7 +40,7 @@ def subsequent_hit(movies: tuple[str, ...], user_id: int, stamp: datetime,
     )
 
 
-def licensing_cost(path: Path, viewing_units: set[tuple[int, str]], *, fee_column="license_cost") -> dict:
+def load_licensing_fees(path: Path, *, fee_column="license_cost"):
     fees = {}
     invalid_fees = set()
     path = Path(path)
@@ -65,6 +65,11 @@ def licensing_cost(path: Path, viewing_units: set[tuple[int, str]], *, fee_colum
                         invalid_fees.add(movie_id)
                         fee = None
             fees[movie_id] = fee
+    return fees, invalid_fees
+
+
+def licensing_cost(path: Path, viewing_units: set[tuple[int, str]], *, fee_column="license_cost") -> dict:
+    fees, invalid_fees = load_licensing_fees(path, fee_column=fee_column)
     counts = Counter({
         "observed_units": len(viewing_units), "covered_units": 0,
         "missing_catalog_units": 0, "missing_fee_units": 0, "invalid_fee_units": 0,

@@ -6,6 +6,11 @@ split between distinct versions, and 2,651/2,651 successful course requests in t
 ten-minute update window. Two updates within the final submission window and their
 own course-log availability evidence remain completion requirements.
 
+For a planned A/B run, use the [experiment tracking workflow](M3_EXPERIMENTS.md).
+It freezes the allocation and both versions through the outcome window and saves
+watch/rating observations before compaction. Finish or explicitly abort a registered
+experiment before running model updates or manual traffic switches.
+
 ## What changed
 
 Question answered: how can we replace a loaded model while keeping the public

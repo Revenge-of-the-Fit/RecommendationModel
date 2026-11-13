@@ -26,6 +26,11 @@ def read_routing(path):
     for key in ("generation", "salt"):
         if not isinstance(config.get(key), str) or not config[key].strip():
             raise ValueError(f"Routing configuration needs {key}")
+    if config.get("experiment") is not None:
+        from experiments.config import experiment_routing, validate_plan
+        plan = validate_plan(config["experiment"])
+        if any(config[key] != value for key, value in experiment_routing(plan).items()):
+            raise ValueError("Routing must match the fixed experiment plan")
     return config
 
 

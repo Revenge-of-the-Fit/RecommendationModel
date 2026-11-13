@@ -3,7 +3,9 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,22 +15,31 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from pydantic import TypeAdapter
 
 from routing import BACKENDS, other_slot, read_routing, selected_slot
+from experiments.config import active_plan, arm_for_slot
+from storage.requests import RequestLog
 
 
 LOGGER = logging.getLogger(__name__)
 USER_ID = TypeAdapter(int)
 
 
-def create_gateway(routing_path=None, *, transport=None):
+def create_gateway(routing_path=None, *, transport=None, experiment_directory=None):
     routing_path = Path(routing_path or os.environ.get("ROUTING_PATH", "/app/models/routing.json"))
+    experiment_directory = experiment_directory or os.environ.get("EXPERIMENT_DIRECTORY")
 
     @asynccontextmanager
     async def lifespan(app):
         app.state.routing = read_routing(routing_path)
-        async with httpx.AsyncClient(transport=transport, trust_env=False,
-                                    limits=httpx.Limits(max_connections=200, max_keepalive_connections=50)) as client:
-            app.state.client = client
-            yield
+        app.state.started_at = datetime.now(timezone.utc).isoformat()
+        app.state.experiment_log = RequestLog(Path(experiment_directory) / "requests.sqlite3", busy_timeout=5) if experiment_directory else None
+        try:
+            async with httpx.AsyncClient(transport=transport, trust_env=False,
+                                        limits=httpx.Limits(max_connections=200, max_keepalive_connections=50)) as client:
+                app.state.client = client
+                yield
+        finally:
+            if app.state.experiment_log is not None:
+                app.state.experiment_log.close()
 
     app = FastAPI(title="Recommendation router", lifespan=lifespan)
 
@@ -42,6 +53,14 @@ def create_gateway(routing_path=None, *, transport=None):
     @app.get("/health/routing")
     async def routing():
         return configuration()
+
+    @app.get("/health/experiment")
+    async def experiment_health():
+        writer = app.state.experiment_log
+        status = writer.status() if writer is not None else {"healthy": False, "last_error": "not_configured"}
+        return JSONResponse({**status, "started_at": app.state.started_at,
+                             "experiment": configuration().get("experiment")},
+                            status_code=200 if status["healthy"] else 503)
 
     @app.get("/health/ready")
     async def readiness():
@@ -73,11 +92,40 @@ def create_gateway(routing_path=None, *, transport=None):
     @app.get("/recommend/{userid}")
     async def recommend(userid: str):
         config = configuration()
+        stamp = datetime.now(timezone.utc)
+        plan = active_plan(config, stamp)
+        if config.get("experiment") and plan is None:
+            config = {**config, "secondary_percent": 0}  # Only control outside the fixed run window.
         try:
             normalized = USER_ID.validate_python(userid)
         except ValueError:
             normalized = userid  # The backend records and rejects invalid input.
         assigned = selected_slot(config, normalized)
+        trace = {}
+        status = None
+        try:
+            response = await forward(userid, assigned, config, trace)
+            status = response.status_code
+            if plan is not None:
+                response.headers["x-experiment-id"] = plan["id"]
+                response.headers["x-experiment-arm"] = arm_for_slot(plan, assigned)
+            return response
+        finally:
+            if plan is not None and type(normalized) is int and 0 < normalized <= 2**63 - 1:
+                writer = app.state.experiment_log
+                if writer is not None:
+                    writer.submit({
+                        "request_id": uuid.uuid4().hex, "started_at": stamp.isoformat(),
+                        "user_id": normalized, "experiment_id": plan["id"],
+                        "assigned_arm": arm_for_slot(plan, assigned), "assigned_slot": assigned,
+                        "routing_generation": config["generation"], "status": status,
+                        "actual_slot": trace.get("slot"), "served_version": trace.get("version"),
+                        "backend_request_id": trace.get("request_id"),
+                    })
+                else:
+                    LOGGER.error("Experiment assignment could not be recorded")
+
+    async def forward(userid, assigned, config, trace):
         deadline = time.monotonic() + 0.55
         for attempt, slot in enumerate((assigned, other_slot(assigned))):
             remaining = deadline - time.monotonic()
@@ -100,6 +148,8 @@ def create_gateway(routing_path=None, *, transport=None):
                     not item or any(c.isspace() for c in item) for item in ids
                 ):
                     continue
+                trace.update(slot=slot, version=response.headers.get("x-model-version"),
+                             request_id=response.headers.get("x-request-id"))
                 return Response(response.content, media_type="text/plain", headers={
                     "x-request-id": response.headers.get("x-request-id", ""),
                     "x-model-version": response.headers.get("x-model-version", ""),

@@ -97,10 +97,12 @@ def run_consumer(
     stop_event: threading.Event | None = None,
     batch_size: int = 500, batch_interval: float = 0.5,
     watch_idle_seconds: float = 300, max_watch_sessions: int = 50000,
+    observation_capture=None,
 ) -> dict:
     stats = {name: 0 for name in ("received", "stored", "duplicates", "coalesced", "parsed", "unrecognized", "failed", "committed")}
     stop_event = stop_event or threading.Event()
     ready = []
+    observations = []
     consumed = {}
     committed = {}
     timestamps = {}
@@ -109,6 +111,10 @@ def run_consumer(
     aborted = False
 
     def flush(now=None):
+        if observation_capture is not None:
+            # Persist original events before coalescing/compaction or acknowledging Kafka offsets.
+            observation_capture.capture(observations)
+            observations.clear()
         if now is not None:
             watermark = min(timestamps.values()) if timestamps and assigned <= timestamps.keys() else None
             ready.extend(watches.expire(now, watermark))
@@ -136,6 +142,7 @@ def run_consumer(
 
     def clear_assignment():
         ready.clear()
+        observations.clear()
         watches.flush()
         consumed.clear()
         committed.clear()
@@ -191,6 +198,8 @@ def run_consumer(
             envelope = capture_envelope(message, source_id)
             safe_value, _ = redact_bytes(envelope.value)
             parsed = parse_event(safe_value, event_timezone=event_timezone)
+            if observation_capture is not None:
+                observations.append((envelope, parsed))
             key = (envelope.topic, envelope.partition)
             sequence = consumed.get(key, (0, 0))[1]
             ready.extend(watches.process(envelope, parsed, now, sequence))

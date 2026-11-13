@@ -205,6 +205,14 @@ class ContainerStorageTests(unittest.TestCase):
         self.assertIn("--run-as-uid", kafka["command"])
         self.assertIn("--run-as-gid", kafka["command"])
 
+    def test_experiment_capture_survives_restarts_without_changing_the_live_database(self):
+        for name in ("gateway", "kafka", "model-update"):
+            service = self.configuration["services"][name]
+            self.assertEqual(service["environment"]["EXPERIMENT_DIRECTORY"], "/app/state/experiments")
+            mount = next(item for item in service["volumes"] if item["target"] == "/app/state/experiments")
+            self.assertEqual(mount["source"], "experiment_logs")
+            self.assertEqual(mount.get("read_only", False), name == "model-update")
+
     def test_archives_survive_recreation_and_diagnostics_are_compressed_and_bounded(self):
         maintenance = self.configuration["services"]["storage-maintenance"]
         self.assertIn("--no-backups", maintenance["command"])

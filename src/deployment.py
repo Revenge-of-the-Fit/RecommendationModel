@@ -74,7 +74,7 @@ def stage_candidate(directory, candidate, data_directory, catalog_directory):
 
     directory, candidate = Path(directory), Path(candidate)
     config = read_routing(directory / "routing.json")
-    if config["secondary_percent"] != 0:
+    if config.get("experiment") or config["secondary_percent"] != 0:
         raise ValueError("End the traffic split before updating either experiment model")
     active, target = config["primary"], other_slot(config["primary"])
     current, current_manifest = slot_paths(directory, active)
@@ -116,6 +116,8 @@ def switch_traffic(directory, slot, percentage, storage_path, *, gateway_url="ht
         raise ValueError("Secondary traffic percentage must be an integer from 0 to 100")
     path = directory / "routing.json"
     previous = read_routing(path)
+    if previous.get("experiment"):
+        raise ValueError("Finish or explicitly abort the experiment before changing traffic")
     if get_json(gateway_url + "/health/routing") != previous:
         raise ValueError("Gateway is not using the current routing file")
     # Keep a proven, ready fallback, even when its configured share is zero.
@@ -189,7 +191,7 @@ def main():
         elif args.command == "status":
             result = read_routing(args.directory / "routing.json")
             if args.shell:
-                if result["secondary_percent"]:
+                if result.get("experiment") or result["secondary_percent"]:
                     raise ValueError("End the traffic split before updating models")
                 wait_ready(args.directory, result["primary"], timeout=0)
                 print(result["primary"], other_slot(result["primary"]))
