@@ -1,0 +1,32 @@
+{
+  "id": "tracking-smoke-20261113",
+  "registered_at": "2026-11-13T17:55:26.772910+00:00",
+  "start": "2026-11-13T17:58:17+00:00",
+  "enrollment_end": "2026-11-13T18:13:17+00:00",
+  "follow_up_seconds": 900.0,
+  "observation_end": "2026-11-13T18:28:17+00:00",
+  "control_slot": "blue",
+  "treatment_percent": 50,
+  "salt": "726f6ac3a5924d8ab5408bf412caefc7",
+  "versions": {
+    "blue": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "green": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676"
+  },
+  "control_description": "Nov 13 retrained EASE model",
+  "treatment_description": "Previous Oct 29 EASE model; infrastructure smoke test",
+  "source_id": "cmu-movielog",
+  "topic": "movielog2",
+  "partitions": [
+    0,
+    1
+  ],
+  "fees_source": "/app/data/movies.csv.gz",
+  "fees_file": "fees.csv.gz",
+  "fee_column": "license_cost",
+  "fees_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+  "invalid_fee_movies": 0,
+  "code_revision": "9a727bbcd60f3e1021f9a0a2fe796a6c5e8f2bf5",
+  "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
+  "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
+  "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up"
+}

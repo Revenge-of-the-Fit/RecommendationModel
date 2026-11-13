@@ -5,6 +5,11 @@ The cheaper ranking policy and the final licensing-cost experiment belong to
 their own tickets. An infrastructure smoke test with the existing models does
 not answer the final cost-versus-ratings question.
 
+The [November 13 production verification](verification/m3-experiment-2026-11-13.md)
+completed enrollment, event capture, export and local re-analysis for 7,975 users.
+It includes the saved plan, aggregate results and completion record. The smoke test
+also identified incomplete movie-fee coverage to address before the final run.
+
 ## Design and fixed protocol
 
 Before a run, [experiment.py](src/experiment.py) records an immutable plan with
@@ -167,5 +172,6 @@ repeated requests and watches, late observations, equal user weights, missing fe
 conditional ratings, Welch interval direction, immutable plans and snapshot
 re-analysis. `tests/test_watch_consumer.py` checks that intermediate watches survive
 coalescing and that failed capture cannot acknowledge Kafka offsets. Existing
-gateway/deployment and online-evaluation tests remain in CI. All tests use local
-fixtures; production deployment and smoke-test evidence must be recorded separately.
+gateway/deployment and online-evaluation tests remain in CI. All automated tests use
+local fixtures; the production verification linked above records the deployed run
+and independent re-analysis of its preserved observations.

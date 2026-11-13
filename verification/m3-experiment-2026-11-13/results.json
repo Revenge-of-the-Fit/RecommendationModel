@@ -1,0 +1,200 @@
+{
+  "experiment_id": "tracking-smoke-20261113",
+  "arms": {
+    "control": {
+      "assigned_users": 4002,
+      "users_with_watches": 3975,
+      "observed_units": 3993,
+      "covered_units": 3083,
+      "fee_coverage": 0.7721011770598547,
+      "users_with_complete_fees": 3095,
+      "known_spend_usd": 936.5243416544,
+      "total_spend_usd": null,
+      "mean_spend_per_assigned_user_usd": null,
+      "mean_known_spend_per_assigned_user_usd": 0.2340140783744128,
+      "mean_fee_per_observed_unit_usd": null,
+      "mean_known_fee_per_covered_unit_usd": 0.30377046437054817,
+      "missing_catalog_units": 910,
+      "missing_fee_units": 0,
+      "invalid_fee_units": 0,
+      "rating_users": 15,
+      "rated_units": 15,
+      "rating_user_coverage": 0.0037481259370314842,
+      "rating_unit_coverage": 0.003756574004507889,
+      "mean_user_rating": 7.333333333333333,
+      "mean_submitted_rating": 7.333333333333333
+    },
+    "treatment": {
+      "assigned_users": 3973,
+      "users_with_watches": 3937,
+      "observed_units": 3954,
+      "covered_units": 3050,
+      "fee_coverage": 0.7713707637835103,
+      "users_with_complete_fees": 3072,
+      "known_spend_usd": 942.575411294,
+      "total_spend_usd": null,
+      "mean_spend_per_assigned_user_usd": null,
+      "mean_known_spend_per_assigned_user_usd": 0.2372452583171407,
+      "mean_fee_per_observed_unit_usd": null,
+      "mean_known_fee_per_covered_unit_usd": 0.3090411184570492,
+      "missing_catalog_units": 904,
+      "missing_fee_units": 0,
+      "invalid_fee_units": 0,
+      "rating_users": 12,
+      "rated_units": 12,
+      "rating_user_coverage": 0.003020387616410773,
+      "rating_unit_coverage": 0.0030349013657056147,
+      "mean_user_rating": 7.25,
+      "mean_submitted_rating": 7.25
+    }
+  },
+  "comparisons": {
+    "spend_per_assigned_user_usd": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 0,
+      "treatment_users": 0,
+      "difference": null,
+      "ci95": null,
+      "p_value": null,
+      "status": "unknown_missing_fees"
+    },
+    "spend_per_user_with_complete_fees_usd": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 3095,
+      "treatment_users": 3072,
+      "difference": 0.00378217103170414,
+      "ci95": [
+        -0.003461487076622395,
+        0.011025829140030675
+      ],
+      "p_value": 0.30607958219847475,
+      "status": "estimated"
+    },
+    "mean_rating_per_rater": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 15,
+      "treatment_users": 12,
+      "difference": -0.08333333333333304,
+      "ci95": [
+        -1.0883603076549357,
+        0.9216936409882697
+      ],
+      "p_value": 0.8657755058649368,
+      "status": "estimated"
+    },
+    "mean_fee_per_observed_unit_usd": {
+      "difference": null,
+      "method": "descriptive pooled viewing-unit mean; no independent-view test"
+    }
+  },
+  "telemetry": {
+    "fallback_requests": 0,
+    "requests": 15911
+  },
+  "has_users_in_both_arms": true,
+  "assignment_balance_p_value": 0.75387282770662,
+  "interpretation": "Assignment-based comparison, including failed requests, fallback responses and users with no watches. Ratings describe raters only; missing fees and ratings are unknown. Complete-fee users are a conditional secondary comparison. Tests assume independent users; 95% intervals are approximate and per metric, not joint. No sequential stopping on significance.",
+  "plan": {
+    "id": "tracking-smoke-20261113",
+    "registered_at": "2026-11-13T17:55:26.772910+00:00",
+    "start": "2026-11-13T17:58:17+00:00",
+    "enrollment_end": "2026-11-13T18:13:17+00:00",
+    "follow_up_seconds": 900.0,
+    "observation_end": "2026-11-13T18:28:17+00:00",
+    "control_slot": "blue",
+    "treatment_percent": 50,
+    "salt": "726f6ac3a5924d8ab5408bf412caefc7",
+    "versions": {
+      "blue": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+      "green": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676"
+    },
+    "control_description": "Nov 13 retrained EASE model",
+    "treatment_description": "Previous Oct 29 EASE model; infrastructure smoke test",
+    "source_id": "cmu-movielog",
+    "topic": "movielog2",
+    "partitions": [
+      0,
+      1
+    ],
+    "fees_source": "/app/data/movies.csv.gz",
+    "fees_file": "fees.csv.gz",
+    "fee_column": "license_cost",
+    "fees_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+    "invalid_fee_movies": 0,
+    "code_revision": "9a727bbcd60f3e1021f9a0a2fe796a6c5e8f2bf5",
+    "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
+    "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
+    "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up"
+  },
+  "capture": {
+    "partitions": {
+      "0": {
+        "partition": 0,
+        "first_time": "2026-11-13T17:55:26.621000+00:00",
+        "latest_time": "2026-11-13T18:50:30.217000+00:00",
+        "last_offset": 1400200674,
+        "last_ingested_at": "2026-11-13T18:50:30.336636+00:00",
+        "invalid_outcomes": 656
+      },
+      "1": {
+        "partition": 1,
+        "first_time": "2026-11-13T17:55:26.890000+00:00",
+        "latest_time": "2026-11-13T18:50:30.465000+00:00",
+        "last_offset": 1400200674,
+        "last_ingested_at": "2026-11-13T18:50:30.471619+00:00",
+        "invalid_outcomes": 649
+      }
+    },
+    "gateway_logging": {
+      "accepted": 15911,
+      "written": 15911,
+      "duplicates": 0,
+      "failed": 0,
+      "rejected": 0,
+      "queued": 0,
+      "healthy": true,
+      "last_error": null,
+      "last_write_at": "2026-11-13T18:28:16.128364+00:00",
+      "started_at": "2026-11-13T17:51:39.261409+00:00",
+      "experiment": {
+        "id": "tracking-smoke-20261113",
+        "registered_at": "2026-11-13T17:55:26.772910+00:00",
+        "start": "2026-11-13T17:58:17+00:00",
+        "enrollment_end": "2026-11-13T18:13:17+00:00",
+        "follow_up_seconds": 900.0,
+        "observation_end": "2026-11-13T18:28:17+00:00",
+        "control_slot": "blue",
+        "treatment_percent": 50,
+        "salt": "726f6ac3a5924d8ab5408bf412caefc7",
+        "versions": {
+          "blue": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+          "green": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676"
+        },
+        "control_description": "Nov 13 retrained EASE model",
+        "treatment_description": "Previous Oct 29 EASE model; infrastructure smoke test",
+        "source_id": "cmu-movielog",
+        "topic": "movielog2",
+        "partitions": [
+          0,
+          1
+        ],
+        "fees_source": "/app/data/movies.csv.gz",
+        "fees_file": "fees.csv.gz",
+        "fee_column": "license_cost",
+        "fees_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+        "invalid_fee_movies": 0,
+        "code_revision": "9a727bbcd60f3e1021f9a0a2fe796a6c5e8f2bf5",
+        "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
+        "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
+        "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up"
+      }
+    },
+    "note": "Partition bounds establish captured time coverage, not proof that every source event was valid or every client received a response."
+  },
+  "input_files": {
+    "plan.json": "c3a0150a5c97af392937f3d1a9df64310ba2b5b4091e0cc7c6b438ff86eb532a",
+    "fees.csv.gz": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+    "requests.jsonl.gz": "43b54322df2b34badba8f2b6fedfe0e20e6c19c6df928921ef50af7219227329",
+    "outcomes.jsonl.gz": "5644e656b6f67bfbce3cebad3f206e19ff0c70ca03f96980d27e9006701ba216"
+  }
+}
