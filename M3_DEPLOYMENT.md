@@ -1,5 +1,10 @@
 # M3 model switching and updates (issue #40)
 
+The [November 13 production rehearsal](verification/m3-rehearsal-2026-11-13.md)
+records the initial migration, a newer model activated in production, and a brief
+split between distinct versions. Submission-window updates and course-log
+availability evidence remain separate completion requirements.
+
 ## What changed
 
 Question answered: how can we replace a loaded model while keeping the public
@@ -198,5 +203,5 @@ concurrent requests during a switch, stable user assignment, bounded retries,
 readiness rejection, automatic rollback, unchanged active artifacts after staging
 failures, orchestration failures, cross-process profile locking and Kafka evidence
 that includes failed requests. Existing CI runs these tests and builds the image
-without production credentials. Runtime memory, external latency and the initial
-port migration still need verification on the VM.
+without production credentials. Check runtime resources and external serving on
+the VM as well; the rehearsal above records the checks completed so far.
