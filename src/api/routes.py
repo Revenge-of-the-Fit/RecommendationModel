@@ -1,6 +1,7 @@
 """HTTP routes for the milestone recommendation endpoint."""
 
 import logging
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
@@ -32,6 +33,11 @@ def readiness(service: Service) -> dict[str, str]:
     return {"status": "ready"}
 
 
+@router.get("/health/model")
+def model_version(service: Service) -> dict:
+    return {"status": "ready", "versions": service.versions}
+
+
 @router.get("/health/storage")
 def storage_health(request: Request) -> JSONResponse:
     status = storage_status(request.app.state)
@@ -46,12 +52,16 @@ def recommend(
 ) -> PlainTextResponse:
     request.state.user_id = userid
     try:
-        result = service.recommend(userid, deadline=getattr(request.state, "recommendation_deadline", None))
+        deadline = getattr(request.state, "recommendation_deadline", None)
+        if request.headers.get("x-fast-fallback") == "1":
+            deadline = min(deadline or float("inf"), time.monotonic() + 0.07)
+        result = service.recommend(userid, deadline=deadline)
     except (ValidationError, ValueError, OSError) as error:
         request.state.error_type = type(error).__name__
         LOGGER.error("Could not serve request %s (%s)", request.state.request_id, type(error).__name__)
         raise HTTPException(503, "Recommendations are unavailable") from None
     request.state.recommendation_result = result
     return PlainTextResponse(
-        ",".join(item.movie_id for item in result.recommendations)
+        ",".join(item.movie_id for item in result.recommendations),
+        headers={"x-model-version": service.versions.get("model", "unknown")},
     )

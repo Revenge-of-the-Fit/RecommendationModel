@@ -223,7 +223,7 @@ def test_deployment_check_requires_request_from_loaded_candidate(production, loa
     assert clock[0] <= 30.1
 
 
-@pytest.mark.parametrize("failed_step", ["prepare_recent_data.py", "train.py", "model_update.py install", ""])
+@pytest.mark.parametrize("failed_step", ["prepare_recent_data.py", "train.py", "deployment.py stage", "deployment.py wait", ""])
 def test_update_script_stops_before_restart_when_a_stage_fails(tmp_path, failed_step):
     bash = shutil.which("bash")
     if os.name == "nt":
@@ -239,7 +239,8 @@ def test_update_script_stops_before_restart_when_a_stage_fails(tmp_path, failed_
         "curl": "exit 0\n",
         "docker": ('printf "%s\\n" "$*" >> "$CALL_LOG"\n'
                    'if [ -n "$FAILED_STEP" ]; then\n'
-                   '  case "$*" in *"$FAILED_STEP"*) exit 12 ;; esac\nfi\n'),
+                   '  case "$*" in *"$FAILED_STEP"*) exit 12 ;; esac\nfi\n'
+                   'case "$*" in *"status --shell"*) echo "blue green" ;; esac\n'),
     }.items():
         executable = binaries / name
         executable.write_text("#!/bin/sh\n" + text, newline="\n")
@@ -251,9 +252,14 @@ def test_update_script_stops_before_restart_when_a_stage_fails(tmp_path, failed_
                             env=env, capture_output=True, text=True, timeout=30)
     calls = log.read_text() if log.exists() else ""
     if failed_step:
-        assert result.returncode == 12, result.stderr
-        assert "force-recreate api" not in calls
+        assert result.returncode == (1 if failed_step == "deployment.py wait" else 12), result.stderr
+        assert "deployment.py switch" not in calls
+        if failed_step != "deployment.py wait":
+            assert "force-recreate" not in calls
     else:
         assert result.returncode == 0, result.stderr
-        assert calls.index("train.py") < calls.index("model_update.py install") < calls.index("force-recreate api")
-        assert "model_update.py verify" in calls
+        assert calls.index("train.py") < calls.index("deployment.py stage") < calls.index("force-recreate api-green")
+        assert calls.index("deployment.py wait green") < calls.index("deployment.py switch green")
+        assert "--model-path /app/models/slots/blue/recommender.npz" in calls
+    assert "force-recreate api\n" not in calls
+    assert "force-recreate gateway" not in calls

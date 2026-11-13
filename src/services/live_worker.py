@@ -11,6 +11,7 @@ from services.metadata_http import MetadataHttpFetcher
 from storage.live import LiveStore, merge_history, read_live_user
 from storage.metadata import MetadataStore
 from storage.profiles import content_version
+from services.worker_lock import preparation_lock
 
 
 LOGGER = logging.getLogger(__name__)
@@ -119,6 +120,13 @@ class LiveProfileWorker:
         LOGGER.warning("Live profile preparation failed (%s)", category)
 
     def run_once(self, fetcher=None, *, user_id=None):
+        # The cache alone cannot prevent two processes paying for the same cache miss.
+        # Nonblocking acquisition keeps the other API's request path responsive.
+        with preparation_lock(self.settings.storage_path) as acquired:
+            if acquired:
+                return self._run_once(fetcher, user_id=user_id)
+
+    def _run_once(self, fetcher=None, *, user_id=None):
         with LiveStore(self.settings.storage_path) as live:
             # Kafka already projects new events; replay old rows only in background batches.
             if user_id is None:

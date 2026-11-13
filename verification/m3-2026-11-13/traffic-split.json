@@ -1,0 +1,58 @@
+{
+  "status": "deployed",
+  "started_at": "2026-11-13T11:22:15.478414+00:00",
+  "previous_routing": {
+    "primary": "blue",
+    "secondary_percent": 0,
+    "salt": "m3-users-v1",
+    "generation": "fc08745c5e2b473b814821ee324775f1"
+  },
+  "routing": {
+    "primary": "blue",
+    "secondary_percent": 50,
+    "salt": "m3-users-v1",
+    "generation": "f3677e6fb8d5475e879319bed103051b"
+  },
+  "versions": {
+    "blue": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "green": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676"
+  },
+  "candidate_probe": {
+    "status": "deployed",
+    "request_id": "b71cdb8411874ad6aebb332fac1e218b",
+    "model_version": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "previous_model_sha256": "673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676",
+    "http_ms": 2.941,
+    "recommendations": 20,
+    "data_directory": "/app/models/updates/20261113T111208Z-3885278/data",
+    "training_start": "2026-11-13T07:04:30+00:00",
+    "training_end": "2026-11-13T10:34:03+00:00"
+  },
+  "evidence_path": "/app/models/updates/20261113T111208Z-3885278/traffic-split.json",
+  "switched_at": "2026-11-13T11:22:15.480466+00:00",
+  "public_probes": {
+    "green": {
+      "status": "deployed",
+      "request_id": "57d3b5a7a75c4a53b1ac2062c65fde0f",
+      "model_version": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676",
+      "previous_model_sha256": "47a2b22f7589bcf0b4753663917bbfcfc031442efa3ddb3697fd401c4acfaaa6",
+      "http_ms": 7.152,
+      "recommendations": 20,
+      "data_directory": "/app/models/updates/20261029T061410Z-1965682/data",
+      "training_start": "2026-10-29T03:13:51+00:00",
+      "training_end": "2026-10-29T06:02:03+00:00"
+    },
+    "blue": {
+      "status": "deployed",
+      "request_id": "f677b356a80447418652f7f4ac6ac58f",
+      "model_version": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+      "previous_model_sha256": "673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676",
+      "http_ms": 4.633,
+      "recommendations": 20,
+      "data_directory": "/app/models/updates/20261113T111208Z-3885278/data",
+      "training_start": "2026-11-13T07:04:30+00:00",
+      "training_end": "2026-11-13T10:34:03+00:00"
+    }
+  },
+  "finished_at": "2026-11-13T11:22:15.597281+00:00"
+}

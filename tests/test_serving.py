@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+import httpx
 from fastapi.testclient import TestClient
 
 
@@ -19,6 +20,10 @@ from models.settings import ServingSettings
 from recommender import EaseRecommender
 from services.recommendation import RecommendationService
 from services.versions import code_version
+from services.versions import file_version
+from api.gateway import create_gateway
+from routing import write_json
+from storage.requests import RequestStore
 
 
 class ServingProvenanceTests(unittest.TestCase):
@@ -57,6 +62,36 @@ class ServingProvenanceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def test_router_serves_two_real_models_with_persisted_request_identity(self):
+        green_path = self.directory / "green.npz"
+        green_model = EaseRecommender(regularization=200)
+        green_model.fit(self.dataset.get_interactions(), self.movies)
+        green_model.save(green_path)
+        apps = {"api": create_app(self.settings),
+                "api-green": create_app(self.settings.model_copy(update={"model_path": green_path}))}
+        routing = self.directory / "routing.json"
+        config = {"primary": "blue", "secondary_percent": 0, "salt": "integration", "generation": "before"}
+        write_json(routing, config)
+
+        async def transport(request):
+            return await httpx.ASGITransport(app=apps[request.url.host]).handle_async_request(request)
+
+        records = []
+        with TestClient(apps["api"]), TestClient(apps["api-green"]):
+            with TestClient(create_gateway(routing, transport=httpx.MockTransport(transport))) as client:
+                for slot, path in (("blue", self.settings.model_path), ("green", green_path)):
+                    write_json(routing, {**config, "primary": slot, "generation": slot})
+                    for user in (1, 999):  # Personalized and cold/fallback requests.
+                        result = client.get(f"/recommend/{user}")
+                        self.assertEqual(result.status_code, 200)
+                        self.assertEqual(result.headers["x-model-slot"], slot)
+                        self.assertEqual(result.headers["x-model-version"], file_version(path))
+                        records.append((result.headers["x-request-id"], file_version(path)))
+        self.assertNotEqual(file_version(green_path), file_version(self.settings.model_path))
+        with RequestStore(self.settings.storage_path) as store:
+            for request_id, version in records:
+                self.assertEqual(store.get_request(request_id)["versions"]["model"], version)
 
     def test_loaded_service_fingerprints_model_and_preserves_warm_ranking(self):
         service = RecommendationService.load(self.settings)
