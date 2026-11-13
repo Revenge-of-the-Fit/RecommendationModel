@@ -14,6 +14,8 @@ from events.consumer import KafkaIngestionError, run_consumer
 from events.parser import parse_event
 from storage.events import EventStore, KafkaEnvelope
 from storage.live import read_live_user
+from experiments.capture import OutcomeCapture
+from routing import write_json
 from test_event_consumer import FakeConsumer, FakeMessage
 
 
@@ -147,6 +149,41 @@ class WatchConsumerTests(unittest.TestCase):
                 run_consumer(consumer, store, "cmu-movielog", batch_size=2, max_messages=2)
             self.assertEqual(store.list_events(42), [])
         self.assertEqual(read_live_user(self.path, 42)["seen"], set())
+        self.assertEqual(consumer.commits, [])
+
+    def test_experiment_capture_keeps_middle_watch_before_buffer_and_database_compaction(self):
+        directory = Path(self.temporary.name)
+        plan = {"id": "raw-watches", "start": "2026-10-08T12:00:00+00:00",
+                "enrollment_end": "2026-10-08T13:00:00+00:00", "follow_up_seconds": 3600,
+                "observation_end": "2026-10-08T14:00:00+00:00", "control_slot": "blue",
+                "treatment_percent": 50, "salt": "test", "versions": {"blue": "a", "green": "b"},
+                "source_id": "cmu-movielog", "topic": "movielog2", "partitions": [2]}
+        routing = directory / "routing.json"
+        write_json(routing, {"primary": "blue", "secondary_percent": 50, "salt": "test", "generation": "test", "experiment": plan})
+        capture = OutcomeCapture(directory / "experiment", routing)
+        consumer = ScriptedConsumer([
+            (0, watch(100, 1, "2026-10-08T12:00:00Z")),
+            (60, watch(101, 2, "2026-10-08T12:01:00Z")),
+            (120, watch(102, 3, "2026-10-08T12:02:00Z")),
+        ])
+        try:
+            self.run_script(consumer, max_messages=3, observation_capture=capture)
+        finally:
+            capture.close()
+        self.assertEqual(self.latest_minute(), 3)
+        connection = sqlite3.connect(directory / "experiment" / "raw-watches" / "outcomes.sqlite3")
+        try:
+            self.assertEqual(connection.execute("SELECT value FROM observations ORDER BY offset").fetchall(), [(1,), (2,), (3,)])
+        finally:
+            connection.close()
+
+    def test_failed_experiment_capture_never_acknowledges_unsaved_observations(self):
+        class FailedCapture:
+            def capture(self, records):
+                raise sqlite3.OperationalError("simulated experiment write failure")
+        consumer = ScriptedConsumer([(0, watch(100, 1, "2026-10-08T12:00:00Z"))])
+        with self.assertRaises(sqlite3.OperationalError):
+            self.run_script(consumer, max_messages=1, observation_capture=FailedCapture())
         self.assertEqual(consumer.commits, [])
 
 

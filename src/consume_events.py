@@ -5,6 +5,7 @@ import math
 import os
 import signal
 import threading
+from contextlib import ExitStack
 from pathlib import Path
 
 from confluent_kafka import Consumer
@@ -12,6 +13,7 @@ from confluent_kafka import Consumer
 from events.consumer import SafeKafkaLogger, load_kafka_config, run_consumer
 from storage.database import DEFAULT_STORAGE_PATH
 from storage.events import EventStore
+from experiments.capture import OutcomeCapture
 
 
 LOGGER = logging.getLogger(__name__)
@@ -88,7 +90,12 @@ def main() -> int:
         config = load_kafka_config(arguments.config, arguments.group_id, arguments.offset_reset)
         # Read the private tunnel configuration before switching to the shared storage owner.
         drop_permissions(arguments.run_as_uid, arguments.run_as_gid)
-        with EventStore(arguments.storage_path, arguments.busy_timeout) as store:
+        with ExitStack() as stack:
+            store = stack.enter_context(EventStore(arguments.storage_path, arguments.busy_timeout))
+            capture = None
+            if os.environ.get("EXPERIMENT_DIRECTORY"):
+                capture = OutcomeCapture(os.environ["EXPERIMENT_DIRECTORY"], os.environ["ROUTING_PATH"])
+                stack.callback(capture.close)
             consumer = Consumer(config, logger=SafeKafkaLogger())
             stats = run_consumer(
                 consumer, store, arguments.source_id, arguments.topic,
@@ -97,6 +104,7 @@ def main() -> int:
                 stop_event=stopped,
                 batch_size=arguments.batch_size, batch_interval=arguments.batch_interval,
                 watch_idle_seconds=arguments.watch_idle_seconds, max_watch_sessions=arguments.max_watch_sessions,
+                observation_capture=capture,
             )
         print(json.dumps(stats, sort_keys=True))
         return 0 if stats["received"] or arguments.max_messages is None or stopped.is_set() else 1

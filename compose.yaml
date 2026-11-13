@@ -37,10 +37,12 @@ services:
       STORAGE_PATH: /app/state/events/events.sqlite3
       DATA_QUALITY_REFERENCE: ${DATA_QUALITY_REFERENCE:-/app/models/data-quality-reference.json}
       METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
+      EXPERIMENT_DIRECTORY: /app/state/experiments
     volumes:
       - catalog:/app/data:ro
       - model:/app/models
       - event_logs:/app/state/events:ro
+      - experiment_logs:/app/state/experiments:ro
     restart: "no"
     logging: *bounded-logging
 
@@ -101,10 +103,12 @@ services:
         condition: service_started
     environment:
       ROUTING_PATH: /app/models/routing.json
+      EXPERIMENT_DIRECTORY: /app/state/experiments
     ports:
       - "${GATEWAY_PORT:-8082}:8082"
     volumes:
       - model:/app/models:ro
+      - experiment_logs:/app/state/experiments
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8082/health/ready', timeout=2)"]
@@ -150,9 +154,14 @@ services:
       - "10001"
       - --run-as-gid
       - "10001"
-    environment: *storage-environment
+    environment:
+      <<: *storage-environment
+      ROUTING_PATH: /app/models/routing.json
+      EXPERIMENT_DIRECTORY: /app/state/experiments
     volumes:
       - event_logs:/app/state/events
+      - model:/app/models:ro
+      - experiment_logs:/app/state/experiments
       - type: bind
         source: ${KAFKA_CONFIG_DIRECTORY:-${HOME:-.}/.config}/mlip-kafka.conf
         target: /app/kafka-config/mlip-kafka.conf
@@ -221,3 +230,4 @@ volumes:
   event_archives:
   live_profiles:
   worker_state:
+  experiment_logs:
