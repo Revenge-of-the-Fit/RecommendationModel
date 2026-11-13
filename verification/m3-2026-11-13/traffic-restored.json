@@ -1,0 +1,47 @@
+{
+  "status": "deployed",
+  "started_at": "2026-11-13T11:22:39.289631+00:00",
+  "previous_routing": {
+    "primary": "blue",
+    "secondary_percent": 50,
+    "salt": "m3-users-v1",
+    "generation": "f3677e6fb8d5475e879319bed103051b"
+  },
+  "routing": {
+    "primary": "blue",
+    "secondary_percent": 0,
+    "salt": "m3-users-v1",
+    "generation": "4a2556b8e3c441e8a53572b90496e12e"
+  },
+  "versions": {
+    "blue": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "green": "sha256:673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676"
+  },
+  "candidate_probe": {
+    "status": "deployed",
+    "request_id": "dead9f7153b74d6596b76420f0f0ac85",
+    "model_version": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "previous_model_sha256": "673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676",
+    "http_ms": 3.132,
+    "recommendations": 20,
+    "data_directory": "/app/models/updates/20261113T111208Z-3885278/data",
+    "training_start": "2026-11-13T07:04:30+00:00",
+    "training_end": "2026-11-13T10:34:03+00:00"
+  },
+  "evidence_path": "/app/models/updates/20261113T111208Z-3885278/traffic-restored.json",
+  "switched_at": "2026-11-13T11:22:39.291751+00:00",
+  "public_probes": {
+    "blue": {
+      "status": "deployed",
+      "request_id": "f9f7c07554024944b339775ffa17475e",
+      "model_version": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+      "previous_model_sha256": "673e4103a6095c76b6ce0181636dd5bb95386f0661e2d35bee9b5a5c20ee6676",
+      "http_ms": 7.592,
+      "recommendations": 20,
+      "data_directory": "/app/models/updates/20261113T111208Z-3885278/data",
+      "training_start": "2026-11-13T07:04:30+00:00",
+      "training_end": "2026-11-13T10:34:03+00:00"
+    }
+  },
+  "finished_at": "2026-11-13T11:22:39.405588+00:00"
+}

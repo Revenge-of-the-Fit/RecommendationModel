@@ -1,9 +1,10 @@
 # M3 model switching and updates (issue #40)
 
 The [November 13 production rehearsal](verification/m3-rehearsal-2026-11-13.md)
-records the initial migration, a newer model activated in production, and a brief
-split between distinct versions. Submission-window updates and course-log
-availability evidence remain separate completion requirements.
+records the initial migration, a newer model activated in production, a brief
+split between distinct versions, and 2,651/2,651 successful course requests in the
+ten-minute update window. Two updates within the final submission window and their
+own course-log availability evidence remain completion requirements.
 
 ## What changed
 
