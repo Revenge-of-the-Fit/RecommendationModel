@@ -1,5 +1,9 @@
 # Deployment
 
+For the current two-model deployment, use [M3_DEPLOYMENT.md](M3_DEPLOYMENT.md).
+The single-API restart/update commands below describe the earlier M1/M2 deployment;
+they must not be used to update the active M3 model server.
+
 ## Decisions cold start (issue #21)
 
 The API uses OpenAI SDK 3.26.0 and `POST /v1/decisions` with `gpt-6-luna`.

@@ -9,6 +9,7 @@ from pathlib import Path
 from dataset import MovieDataset
 from download_data import DatasetDownloader, FILE_HASHES
 from recommender import EaseRecommender
+from deployment import initialize_slots
 
 
 def checksum(path: Path) -> str:
@@ -51,8 +52,12 @@ def main() -> None:
             for name, expected in FILE_HASHES.items()
         },
     }
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"Wrote artifact manifest to {manifest_path}")
+    # A normal restart must not replace a trained model's provenance with provisioning metadata.
+    existing = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+    if existing is None or existing.get("model", {}).get("sha256") != manifest["model"]["sha256"]:
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(f"Wrote artifact manifest to {manifest_path}")
+    initialize_slots(model_path.parent)
 
 
 if __name__ == "__main__":

@@ -159,7 +159,7 @@ class ContainerStorageTests(unittest.TestCase):
         cls.configuration = json.loads(result.stdout)
 
     def test_api_kafka_and_operations_share_persistent_database(self):
-        for name in ("api", "kafka", "storage-maintenance", "profiles-preparation"):
+        for name in ("api", "api-green", "kafka", "storage-maintenance", "profiles-preparation"):
             with self.subTest(service=name):
                 service = self.configuration["services"][name]
                 self.assertEqual(service["environment"]["STORAGE_PATH"], "/app/state/events/events.sqlite3")
@@ -176,6 +176,17 @@ class ContainerStorageTests(unittest.TestCase):
         self.assertIn("METADATA_BASE_URL", api["environment"])
         self.assertNotIn("KAFKA_CONFIG", api["environment"])
         self.assertFalse(api.get("profiles"))
+
+    def test_router_owns_public_port_and_models_have_separate_artifacts(self):
+        services = self.configuration["services"]
+        for name, slot in (("api", "blue"), ("api-green", "green")):
+            self.assertEqual(services[name]["environment"]["MODEL_PATH"], f"/app/models/slots/{slot}/recommender.npz")
+            self.assertEqual(services[name]["ports"][0]["host_ip"], "127.0.0.1")
+        gateway = services["gateway"]
+        self.assertIn("api.gateway:app", gateway["command"])
+        self.assertEqual(gateway["volumes"][0]["source"], "model")
+        self.assertTrue(gateway["volumes"][0]["read_only"])
+        self.assertNotIn("OPENAI_API_KEY", gateway["environment"])
 
     def test_kafka_can_reach_host_tunnel_and_read_private_config(self):
         kafka = self.configuration["services"]["kafka"]

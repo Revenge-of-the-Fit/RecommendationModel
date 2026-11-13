@@ -19,7 +19,7 @@ from services.versions import dataset_version
 from storage.payloads import load_json
 
 
-def install_candidate(candidate, data_directory, model_path, manifest_path, catalog_directory):
+def validate_candidate(candidate, data_directory, model_path, manifest_path, catalog_directory):
     candidate, model_path, manifest_path = map(Path, (candidate, model_path, manifest_path))
     source = json.loads((Path(data_directory) / "dataset-manifest.json").read_text())
     if sha256(model_path) != source["reference_model_sha256"]:
@@ -54,6 +54,13 @@ def install_candidate(candidate, data_directory, model_path, manifest_path, cata
         "training": {"data_directory": str(data_directory), "dataset_version": dataset_version(Path(data_directory)), **source},
         "previous_model_sha256": source["reference_model_sha256"],
     }
+    return report
+
+
+def install_candidate(candidate, data_directory, model_path, manifest_path, catalog_directory):
+    """Legacy M2 installer; M3 stages a separate slot using validate_candidate instead."""
+    candidate, model_path, manifest_path = map(Path, (candidate, model_path, manifest_path))
+    report = validate_candidate(candidate, data_directory, model_path, manifest_path, catalog_directory)
     # Same-volume links keep the candidate/export and one previous artifact available.
     with tempfile.TemporaryDirectory(prefix=".model-install-", dir=model_path.parent) as temporary:
         stage = Path(temporary)
@@ -77,6 +84,8 @@ def verify_deployment(manifest_path, storage_path, *, base_url="http://127.0.0.1
         body = response.read().decode().strip()
         request_id = response.headers["x-request-id"]
     elapsed = (time.perf_counter() - started) * 1000
+    if elapsed >= 600:
+        raise ValueError("Recommendation probe exceeded the course's 600 ms deadline")
     ids = body.split(",")
     if not request_id or not 1 <= len(ids) <= 20 or len(ids) != len(set(ids)) or any(not item or any(c.isspace() for c in item) for item in ids):
         raise ValueError("The updated service returned an invalid recommendation response")
@@ -98,10 +107,10 @@ def verify_deployment(manifest_path, storage_path, *, base_url="http://127.0.0.1
     if record.get("versions", {}).get("model") != expected or record.get("status") != 200:
         raise ValueError("No successful request record confirms the candidate was loaded")
     return {"status": "deployed", "request_id": request_id, "model_version": expected,
-            "previous_model_sha256": manifest["previous_model_sha256"], "http_ms": round(elapsed, 3),
-            "recommendations": len(ids), "data_directory": manifest["training"]["data_directory"],
-            "training_start": manifest["training"]["actual_training_start"],
-            "training_end": manifest["training"]["actual_training_end"]}
+            "previous_model_sha256": manifest.get("previous_model_sha256"), "http_ms": round(elapsed, 3),
+            "recommendations": len(ids), "data_directory": manifest.get("training", {}).get("data_directory"),
+            "training_start": manifest.get("training", {}).get("actual_training_start"),
+            "training_end": manifest.get("training", {}).get("actual_training_end")}
 
 
 def main():
@@ -116,10 +125,11 @@ def main():
         subparser.add_argument("--manifest", type=Path, default="/app/models/artifact-manifest.json")
     install.add_argument("--model-path", type=Path, default="/app/models/recommender.npz")
     verify.add_argument("--storage-path", type=Path, default=os.environ.get("STORAGE_PATH", "/app/state/events/events.sqlite3"))
+    verify.add_argument("--base-url", default="http://127.0.0.1:8082")
     args = parser.parse_args()
     try:
         result = (install_candidate(args.candidate, args.data_dir, args.model_path, args.manifest, args.catalog_dir)
-                  if args.command == "install" else verify_deployment(args.manifest, args.storage_path))
+                  if args.command == "install" else verify_deployment(args.manifest, args.storage_path, base_url=args.base_url))
     except (ValueError, OSError, sqlite3.Error, KeyError) as error:
         parser.exit(1, f"Model update failed ({type(error).__name__}): {error}\n")
     print(json.dumps(result, indent=2))

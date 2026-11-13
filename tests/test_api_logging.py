@@ -117,6 +117,17 @@ class ApiRequestLoggingTests(unittest.TestCase):
         self.assertIsNotNone(finished.utcoffset())
         self.assertGreaterEqual(finished, started)
 
+    def test_retry_shortens_preparation_budget_and_reports_loaded_model(self):
+        with patch("api.app.RecommendationService.load", return_value=self.service):
+            with TestClient(create_app(self.settings)) as client:
+                started = time.monotonic()
+                response = client.get("/recommend/42", headers={"x-fast-fallback": "1"})
+                deadline = self.service.recommend.call_args.kwargs["deadline"]
+                self.assertLessEqual(deadline, time.monotonic() + 0.07)
+                self.assertGreater(deadline, started)
+                self.assertEqual(response.headers["x-model-version"], "model-2")
+                self.assertEqual(client.get("/health/model").json()["versions"], self.service.versions)
+
     def test_cached_cold_start_response_retains_profile_and_provider_references(self):
         self.service.recommend.return_value = recommendation_result(
             method="llm_cold_start", cached=True, fallback_reason=None,

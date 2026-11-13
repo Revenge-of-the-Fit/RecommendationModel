@@ -44,16 +44,16 @@ services:
     restart: "no"
     logging: *bounded-logging
 
-  api:
+  api: &model-api
     build: .
     depends_on:
       provision:
         condition: service_completed_successfully
-    environment:
+    environment: &api-environment
       <<: *storage-environment
       APP_REVISION: ${APP_REVISION:-unknown}
       DATA_DIRECTORY: /app/data
-      MODEL_PATH: /app/models/recommender.npz
+      MODEL_PATH: /app/models/slots/blue/recommender.npz
       CACHE_DIRECTORY: /app/state/cache
       LIVE_ENABLED: "1"
       COLD_START_WAIT_SECONDS: ${COLD_START_WAIT_SECONDS:-0.4}
@@ -62,7 +62,7 @@ services:
       METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-${OPENAI_TOKEN:-}}
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8083:8082"
     volumes:
       - catalog:/app/data:ro
       - model:/app/models:ro
@@ -80,7 +80,37 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
-      start_period: 30s
+      start_period: 10m
+    logging: *bounded-logging
+
+  api-green:
+    <<: *model-api
+    environment:
+      <<: *api-environment
+      MODEL_PATH: /app/models/slots/green/recommender.npz
+    ports:
+      - "127.0.0.1:8084:8082"
+
+  gateway:
+    build: .
+    command: ["python", "-m", "uvicorn", "api.gateway:app", "--host", "0.0.0.0", "--port", "8082"]
+    depends_on:
+      api:
+        condition: service_started
+      api-green:
+        condition: service_started
+    environment:
+      ROUTING_PATH: /app/models/routing.json
+    ports:
+      - "${GATEWAY_PORT:-8082}:8082"
+    volumes:
+      - model:/app/models:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8082/health/ready', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
     logging: *bounded-logging
 
   kafka:

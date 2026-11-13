@@ -11,26 +11,24 @@ run_python() { "${compose[@]}" run --rm --no-deps -T model-update "$@"; }
 run_directory="/app/models/updates/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 "${compose[@]}" config --quiet
-"${compose[@]}" build model-update api
-run_python src/prepare_recent_data.py --output "$run_directory/data" "$@"
+"${compose[@]}" build model-update
+slots=$(run_python src/deployment.py status --shell)
+read -r active target <<< "$slots"
+case "$active:$target" in blue:green|green:blue) ;; *) echo 'Invalid model slots' >&2; exit 1 ;; esac
+service=api
+if [ "$target" = green ]; then service=api-green; fi
+"${compose[@]}" build "$service"
+run_python src/prepare_recent_data.py "$@" --model-path "/app/models/slots/$active/recommender.npz" --output "$run_directory/data"
 run_python src/train.py --data-dir "$run_directory/data" --model-path "$run_directory/candidate.npz"
-run_python src/model_update.py install --data-dir "$run_directory/data" --candidate "$run_directory/candidate.npz"
+run_python src/deployment.py stage --data-dir "$run_directory/data" --candidate "$run_directory/candidate.npz"
 
-"${compose[@]}" up -d --no-deps --no-build --force-recreate api
-ready=0
-for attempt in $(seq 1 120); do
-  if curl -fsS --max-time 2 http://127.0.0.1:8082/health/ready >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  if [ $((attempt % 6)) -eq 0 ]; then
-    printf 'Waiting for API startup (%s seconds)...\n' "$((attempt * 5))"
-  fi
-  sleep 5
-done
-if [ "$ready" -ne 1 ]; then
-  "${compose[@]}" logs --tail=20 api
-  echo 'Updated API did not become ready; previous model is saved as recommender.previous.npz.' >&2
+"${compose[@]}" up -d --no-deps --no-build --force-recreate "$service"
+echo "Waiting up to 10 minutes for $target; $active continues serving."
+if ! run_python src/deployment.py wait "$target"; then
+  "${compose[@]}" logs --tail=20 "$service"
+  echo 'Replacement did not become ready. Traffic still uses the previous model.' >&2
   exit 1
 fi
-"${compose[@]}" exec -T api python src/model_update.py verify
+run_python src/deployment.py switch "$target" --record "$run_directory/deployment.json"
+printf '\nUpdate evidence: %s/deployment.json\n' "$run_directory"
+echo 'After Kafka captures the follow-up period, save availability evidence using scripts/save_update_evidence.sh.'
