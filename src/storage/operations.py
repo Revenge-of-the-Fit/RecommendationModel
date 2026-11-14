@@ -17,6 +17,7 @@ from pathlib import Path
 
 from storage.database import WATCH_EVENTS, StorageError, open_database
 from storage.payloads import unpack_json
+from storage.event_payloads import decoded_event_row, parsed_event
 
 
 TABLES = (
@@ -37,6 +38,8 @@ def compact_watch_events(path, reclaim_space=False):
             connection.execute("PRAGMA temp_store=FILE")
             with connection:
                 connection.execute("BEGIN IMMEDIATE")
+                if connection.execute("SELECT 1 FROM sqlite_master WHERE name='event_history_control'").fetchone():
+                    raise StorageError("Use event history maintenance after compression activation")
                 cursor = connection.execute(f"""
                     DELETE FROM kafka_events WHERE (source_id, topic, partition, offset) IN (
                         SELECT source_id, topic, partition, offset FROM (
@@ -493,6 +496,8 @@ def _row_times(table, row):
 
 def _encoded_row(row):
     row = dict(row)
+    if "raw_value" in row and "parsed_json" in row:
+        row = decoded_event_row(row)
     if "record_json" in row:
         row["record_json"] = unpack_json(row["record_json"])
     return {
@@ -583,7 +588,7 @@ def _impression(table, row):
     else:
         if row["event_type"] != "recommendation" or row["parse_status"] != "parsed":
             return None
-        record = _json(row["parsed_json"]).get("fields", {})
+        record = parsed_event(row).get("fields", {})
         if record.get("status") != 200:
             return None
         stamp = _timestamp(row["event_timestamp"])
@@ -671,7 +676,7 @@ def export_observations(path, output, *, source_id=None, topic=None, start=None,
                 candidate_parameters = (row["user_id"], row["movie_id"], lower, upper)
                 selection = " FROM candidate_impressions WHERE user_id=? AND movie_id=? AND served_at>=? AND served_at<?"
                 candidate_count = connection.execute("SELECT count(*)" + selection, candidate_parameters).fetchone()[0]
-                fields = _json(row["parsed_json"]).get("fields", {})
+                fields = parsed_event(row).get("fields", {})
                 observed = {
                     "record_type": "observed_event", "identity": _event_identity(row),
                     "user_id": row["user_id"], "movie_id": row["movie_id"],

@@ -19,6 +19,7 @@ from events.parser import parse_event
 from services.metadata import MetadataRateLimiter
 from services.metadata_http import MetadataHttpFetcher
 from storage.payloads import load_json
+from storage.event_payloads import unpack_event
 
 
 def in_window(value, start, end):
@@ -46,7 +47,7 @@ def collect_snapshot(storage_path, catalog_directory, *, start, end, reference=N
         quota = max(1, limit // max(1, len(partitions)))
         for partition in partitions:
             rows = connection.execute("""
-                SELECT raw_value,ingested_at FROM kafka_events
+                SELECT raw_value,parsed_json,ingested_at FROM kafka_events
                 WHERE source_id='cmu-movielog' AND topic='movielog2' AND partition=?
                 ORDER BY offset DESC LIMIT ?
             """, (partition, quota + 1)).fetchall()
@@ -59,7 +60,7 @@ def collect_snapshot(storage_path, catalog_directory, *, start, end, reference=N
         requests = [row["record_json"] for row in rows[:limit] if in_window(row["started_at"], start, end)]
     finally:
         connection.close()  # Release the live snapshot before decoding or network calls.
-    parsed = [parse_event(row["raw_value"], event_timezone="UTC") for row in events]
+    parsed = [parse_event(unpack_event(row["raw_value"], row["parsed_json"])[0], event_timezone="UTC") for row in events]
     decoded = []
     for row in requests:
         try:

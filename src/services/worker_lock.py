@@ -6,8 +6,8 @@ from pathlib import Path
 
 
 @contextmanager
-def preparation_lock(database_path):
-    path = Path(str(database_path) + ".profiles.lock")
+def preparation_lock(database_path, suffix=".profiles.lock"):
+    path = Path(str(database_path) + suffix)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+b") as handle:
         if os.name == "nt":

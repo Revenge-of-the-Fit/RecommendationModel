@@ -26,8 +26,8 @@ from storage.metadata import MetadataStore
 from storage.payloads import pack_json
 
 
-@pytest.fixture
-def production(tmp_path):
+@pytest.fixture(params=[False, True], ids=["legacy", "compressed"])
+def production(tmp_path, request):
     catalog = tmp_path / "catalog"
     catalog.mkdir()
     movies = pd.DataFrame([
@@ -73,6 +73,13 @@ def production(tmp_path):
             json.dumps({"model": "test-model", "endpoint": "/v1/decisions",
                         "usage": {"input_tokens": 50}, "request": {"input": "private description"}})))
         connection.commit()
+    if request.param:
+        from storage.event_history import activate, conversion_batch
+        from storage.database import open_database
+        activate(database)
+        with closing(open_database(database)) as connection:
+            while not conversion_batch(connection)["conversion_complete"]:
+                pass
     return database, catalog, model_path, tmp_path / "recent"
 
 

@@ -7,6 +7,9 @@ from pathlib import Path
 
 from storage.database import WATCH_EVENTS, StorageError, open_database, watch_order
 from storage.live import project_event
+from storage.event_payloads import decoded_event_row
+from storage.event_payloads import pack_event
+from storage.event_history import COLUMNS, account, control, expired_offset
 from storage.source_redaction import redact_bytes, redact_headers, redact_source_fields
 
 
@@ -35,6 +38,8 @@ class EventStore:
     def save_events(self, records) -> list[bool]:
         with self.connection:
             self.connection.execute("BEGIN IMMEDIATE")
+            self.history_enabled = control(self.connection) is not None
+            self.page_size = self.connection.execute("PRAGMA page_size").fetchone()[0]
             return [self._save_event(envelope, parsed) for envelope, parsed in records]
 
     def _save_event(self, envelope: KafkaEnvelope, parsed: dict) -> bool:
@@ -62,6 +67,37 @@ class EventStore:
         fingerprint = hashlib.sha256(fingerprint_input.encode("utf-8")).hexdigest()
         parsed = redact_source_fields(parsed)
         parsed_json = json.dumps(parsed, ensure_ascii=False, allow_nan=False, sort_keys=True)
+        existing = self.connection.execute("""
+            SELECT source_fingerprint FROM kafka_events
+            WHERE source_id=? AND topic=? AND partition=? AND offset=?
+        """, (envelope.source_id, envelope.topic, envelope.partition, envelope.offset)).fetchone()
+        if existing is not None:
+            if existing[0] != fingerprint:
+                raise StorageError("Kafka offset already contains a different source record")
+            return False
+        if self.history_enabled and expired_offset(self.connection, envelope.source_id, envelope.topic, envelope.partition, envelope.offset):
+            return False
+        if (parsed.get("event_type") == "watch" and parsed["parse_status"] == "parsed"
+                and parsed.get("user_id") is not None and parsed.get("movie_id") is not None):
+            identity = (envelope.source_id, envelope.topic, parsed["user_id"], parsed["movie_id"])
+            previous_cursor = self.connection.execute(f"""
+                SELECT * FROM kafka_events INDEXED BY watch_by_user_movie
+                WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
+            """, identity)
+            previous = [dict(zip((column[0] for column in previous_cursor.description), row)) for row in previous_cursor]
+            order = watch_order(parsed.get("event_timestamp"), envelope.broker_timestamp_ms,
+                                envelope.partition, envelope.offset)
+            if previous and order <= max(watch_order(row["event_timestamp"], row["broker_timestamp_ms"], row["partition"], row["offset"]) for row in previous):
+                return False
+            if self.history_enabled:
+                for row in previous:
+                    account(self.connection, row, -1, self.page_size)
+            self.connection.execute(f"""
+                DELETE FROM kafka_events INDEXED BY watch_by_user_movie
+                WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
+            """, identity)
+        if self.history_enabled:
+            value, parsed_json = pack_event(value, parsed_json)
         parameters = (
             envelope.source_id, envelope.topic, envelope.partition, envelope.offset,
             fingerprint, key, value, json.dumps(encoded_headers),
@@ -71,29 +107,6 @@ class EventStore:
             parsed.get("movie_id"), parsed.get("event_type"), parsed["parse_status"],
             parsed["parser_version"], parsed_json,
         )
-        existing = self.connection.execute("""
-            SELECT source_fingerprint FROM kafka_events
-            WHERE source_id=? AND topic=? AND partition=? AND offset=?
-        """, (envelope.source_id, envelope.topic, envelope.partition, envelope.offset)).fetchone()
-        if existing is not None:
-            if existing[0] != fingerprint:
-                raise StorageError("Kafka offset already contains a different source record")
-            return False
-        if (parsed.get("event_type") == "watch" and parsed["parse_status"] == "parsed"
-                and parsed.get("user_id") is not None and parsed.get("movie_id") is not None):
-            identity = (envelope.source_id, envelope.topic, parsed["user_id"], parsed["movie_id"])
-            previous = self.connection.execute(f"""
-                SELECT event_timestamp, broker_timestamp_ms, partition, offset FROM kafka_events INDEXED BY watch_by_user_movie
-                WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
-            """, identity).fetchall()
-            order = watch_order(parsed.get("event_timestamp"), envelope.broker_timestamp_ms,
-                                envelope.partition, envelope.offset)
-            if previous and order <= max(watch_order(*row) for row in previous):
-                return False
-            self.connection.execute(f"""
-                DELETE FROM kafka_events INDEXED BY watch_by_user_movie
-                WHERE source_id=? AND topic=? AND user_id=? AND movie_id=? AND {WATCH_EVENTS}
-            """, identity)
         cursor = self.connection.execute("""
             INSERT INTO kafka_events (
                 source_id, topic, partition, offset, source_fingerprint, raw_key, raw_value,
@@ -105,6 +118,8 @@ class EventStore:
         """, parameters)
         inserted = cursor.rowcount == 1
         if inserted:
+            if self.history_enabled:
+                account(self.connection, dict(zip(COLUMNS, parameters)), 1, self.page_size)
             self.connection.execute("""
                 INSERT INTO live_event_cursors(source_id, topic, partition) VALUES (?, ?, ?)
                 ON CONFLICT DO NOTHING
@@ -131,7 +146,7 @@ class EventStore:
 
     @staticmethod
     def _decode_row(cursor, row) -> dict:
-        record = dict(zip((column[0] for column in cursor.description), row))
+        record = decoded_event_row(dict(zip((column[0] for column in cursor.description), row)))
         record["parsed"] = json.loads(record.pop("parsed_json"))
         record["headers"] = [
             (name, base64.b64decode(value) if value is not None else None)

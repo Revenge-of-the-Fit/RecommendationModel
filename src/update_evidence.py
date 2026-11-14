@@ -11,6 +11,7 @@ from pathlib import Path
 
 from prepare_recent_data import utc
 from routing import write_json
+from storage.event_payloads import parsed_event
 
 
 def collect_evidence(deployment_path, storage_path, server, *, minutes=5, max_events=200000,
@@ -42,7 +43,7 @@ def collect_evidence(deployment_path, storage_path, server, *, minutes=5, max_ev
         quota = max_events // len(partitions)
         for partition, in partitions:
             rows = connection.execute("""
-                SELECT offset,event_timestamp,event_type,parse_status,parsed_json FROM kafka_events
+                SELECT offset,event_timestamp,event_type,parse_status,raw_value,parsed_json FROM kafka_events
                 WHERE source_id='cmu-movielog' AND topic='movielog2' AND partition=?
                 ORDER BY offset DESC LIMIT ?
             """, (partition, quota)).fetchall()
@@ -55,7 +56,7 @@ def collect_evidence(deployment_path, storage_path, server, *, minutes=5, max_ev
                 stamps.append(stamp)
                 if row["event_type"] != "recommendation" or not start <= stamp < end:
                     continue
-                fields = json.loads(row["parsed_json"])["fields"]
+                fields = parsed_event(row)["fields"]
                 if not fields.get("server"):
                     unassigned += 1
                     continue
