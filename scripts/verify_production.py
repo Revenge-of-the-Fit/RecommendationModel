@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from storage.payloads import load_json
+from storage.event_payloads import decoded_event_row
 
 
 def utc(value):
@@ -82,6 +83,7 @@ def summarize(connection, start, end, servers, catalog, match_seconds=5):
         WHERE source_id='cmu-movielog' AND topic='movielog2' AND event_type='recommendation'
           AND julianday(event_timestamp) >= julianday(?) AND julianday(event_timestamp) < julianday(?)
     """, (start.isoformat(), end.isoformat())):
+        row = decoded_event_row(row)
         parsed = json.loads(row["parsed_json"])
         fields = parsed.get("fields", {})
         server = fields.get("server")

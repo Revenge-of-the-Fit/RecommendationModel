@@ -17,6 +17,7 @@ import pandas as pd
 from dataset import MovieDataset
 from recommender import EaseRecommender
 from check_data_quality import check_recent_quality
+from storage.event_payloads import parsed_event
 
 
 def utc(value):
@@ -85,7 +86,7 @@ def prepare_recent_data(storage_path, catalog_directory, model_path, output, *,
             # The primary key supports this bounded tail read without scanning the live DB.
             rows = connection.execute("""
                 SELECT source_id,topic,partition,offset,event_timestamp,ingested_at,
-                       user_id,movie_id,event_type,parse_status,parsed_json
+                       user_id,movie_id,event_type,parse_status,raw_value,parsed_json
                 FROM kafka_events WHERE source_id=? AND topic=? AND partition=?
                 ORDER BY offset DESC LIMIT ?
             """, (source_id, topic, number, quota + 1)).fetchall()
@@ -100,8 +101,8 @@ def prepare_recent_data(storage_path, catalog_directory, model_path, output, *,
                     stamp = utc(row["event_timestamp"])
                     if not start <= stamp < end or utc(row["ingested_at"]) > end:
                         continue
-                    parsed = json.loads(row["parsed_json"])
-                    record = {key: row[key] for key in row.keys() if key != "parsed_json"}
+                    parsed = parsed_event(row)
+                    record = {key: row[key] for key in row.keys() if key not in ("raw_value", "parsed_json")}
                     record["parsed"] = parsed
                     source_events.append(record)
                     if row["parse_status"] != "parsed" or row["event_type"] not in ("watch", "rating"):

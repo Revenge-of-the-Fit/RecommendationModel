@@ -12,8 +12,8 @@ from storage.events import EventStore, KafkaEnvelope
 from update_evidence import collect_evidence
 
 
-@pytest.fixture
-def observations(tmp_path):
+@pytest.fixture(params=[False, True], ids=["legacy", "compressed"])
+def observations(tmp_path, request):
     database = tmp_path / "events.sqlite3"
     record = tmp_path / "deployment.json"
     write_json(record, {"status": "deployed", "switched_at": "2026-11-13T12:00:00Z"})
@@ -26,6 +26,11 @@ def observations(tmp_path):
         for offset, (stamp, server, status) in enumerate(samples):
             value = f"2026-11-13T{stamp}Z,1,recommendation request {server}, status {status}, result: movie, 10ms".encode()
             store.save_event(KafkaEnvelope("cmu-movielog", "movielog2", 0, offset, value), parse_event(value))
+        if request.param:
+            from storage.event_history import activate, conversion_batch
+            activate(database)
+            while not conversion_batch(store.connection)["conversion_complete"]:
+                pass
     return record, database
 
 

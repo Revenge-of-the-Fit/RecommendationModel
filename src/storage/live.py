@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from storage.database import open_database
+from storage.event_payloads import parsed_event
 
 
 def queue_user(connection, user_id, priority=1):
@@ -108,14 +109,14 @@ class LiveStore:
             if processed >= limit:
                 break
             rows = self.connection.execute("""
-                SELECT partition, offset, parsed_json, broker_timestamp_ms, ingested_at
+                SELECT partition, offset, raw_value, parsed_json, broker_timestamp_ms, ingested_at
                 FROM kafka_events WHERE source_id=? AND topic=? AND partition=? AND offset>?
                 ORDER BY offset LIMIT ?
             """, (source_id, topic, cursor["partition"], cursor["last_offset"], min(per_partition, limit - processed))).fetchall()
             with self.connection:
                 for row in rows:
                     project_event(self.connection, source_id, topic, row["partition"], row["offset"],
-                                  json.loads(row["parsed_json"]), row["broker_timestamp_ms"], row["ingested_at"])
+                                  parsed_event(row), row["broker_timestamp_ms"], row["ingested_at"])
                 if rows:
                     self.connection.execute("""
                         UPDATE live_event_cursors SET last_offset=? WHERE source_id=? AND topic=? AND partition=?

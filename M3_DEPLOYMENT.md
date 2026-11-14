@@ -11,6 +11,10 @@ It freezes the allocation and both versions through the outcome window and saves
 watch/rating observations before compaction. Finish or explicitly abort a registered
 experiment before running model updates or manual traffic switches.
 
+For lossless Kafka compression and protected history retention, use the staged
+[storage maintenance rollout](M3_STORAGE.md). All readers must be upgraded before
+compression is activated; the model-update image is one of those readers.
+
 ## What changed
 
 Question answered: how can we replace a loaded model while keeping the public
