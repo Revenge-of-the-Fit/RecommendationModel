@@ -1,0 +1,141 @@
+{
+  "generated_at": "2026-11-15T04:17:23.016440+00:00",
+  "server": "cmu-online-mlip-vm02.andrew.cmu.edu:8082",
+  "errors": {},
+  "windows": {
+    "recent_start": "2026-11-15T04:05:23.016440+00:00",
+    "recent_end": "2026-11-15T04:15:23.016440+00:00",
+    "quality_start": "2026-11-15T03:00:23.016440+00:00",
+    "quality_end": "2026-11-15T03:15:23.016440+00:00",
+    "follow_up_seconds": 3600
+  },
+  "coverage": {
+    "0": {
+      "oldest": "2026-11-15T02:19:31+00:00",
+      "newest": "2026-11-15T04:17:22.475000+00:00",
+      "tail_capped": true,
+      "recent_bracketed": true,
+      "quality_bracketed": true
+    },
+    "1": {
+      "oldest": "2026-11-15T02:19:12.120603+00:00",
+      "newest": "2026-11-15T04:17:22.457000+00:00",
+      "tail_capped": true,
+      "recent_bracketed": true,
+      "quality_bracketed": true
+    }
+  },
+  "availability": {
+    "requests": 3931,
+    "successful": 3931,
+    "failed": 0,
+    "statuses": {
+      "200": 3931
+    },
+    "unattributed": 1,
+    "observed_ratio": 1.0,
+    "ratio": 1.0,
+    "conservative_ratio": 0.9997456765005086
+  },
+  "quality": {
+    "impressions": 6947,
+    "hits": 112,
+    "unattributed": 1,
+    "unreadable_watches": 0,
+    "hit_rate_at_20": 0.016122067079314812
+  },
+  "licensing_covered": true,
+  "licensing": {
+    "metric": "metadata licensing-cost proxy",
+    "viewing_unit": "one distinct observed user/movie pair in the recommendation window",
+    "observed_units": 5919,
+    "covered_units": 4611,
+    "missing_catalog_units": 1308,
+    "missing_fee_units": 0,
+    "invalid_fee_units": 0,
+    "fee_coverage": 0.7790167257982767,
+    "known_cost_usd": 1375.9515769365,
+    "total_cost_usd": null,
+    "mean_known_fee_usd": 0.29840632768087183,
+    "metadata_resolved_movies": 75,
+    "metadata_lookup_errors": {
+      "400": 9,
+      "deferred_batches": 14
+    }
+  },
+  "llm": {
+    "attempts": 46,
+    "priced_attempts": 46,
+    "unknown_attempts": 0,
+    "tail_capped": true,
+    "known_cost_usd": 0.0027469,
+    "estimated_cost_usd": 0.0027469,
+    "price_sources": [
+      "https://developers.openai.com/api/docs/guides/decisions#pricing-and-availability",
+      "https://developers.openai.com/api/docs/pricing"
+    ],
+    "price_checked": "2026-11-14"
+  },
+  "drift": {
+    "status": "passed",
+    "findings": [],
+    "distances": {
+      "kafka": {
+        "event_type_non_watch": 0.053928,
+        "schema": 0.001,
+        "rating": null
+      },
+      "user_api": {
+        "schema": 0.0,
+        "description_present": 0.0,
+        "age": 0.0
+      },
+      "movie_api": {
+        "cost": 0.0,
+        "genres": 0.0,
+        "runtime": 0.0,
+        "schema": 0.0
+      },
+      "recommendation_api": {
+        "serving_method": 0.010007,
+        "status": 0.0,
+        "schema": 0.0,
+        "latency": 0.002572
+      }
+    },
+    "samples": {
+      "kafka": 5000,
+      "user_api": 100,
+      "movie_api": 100,
+      "recommendation_api": 3945
+    },
+    "schema_errors": {
+      "kafka": {
+        "unsupported_event": 1,
+        "InvalidUserID": 1,
+        "InvalidWatchEvent": 1,
+        "InvalidTimestamp": 2
+      },
+      "user_api": {},
+      "movie_api": {},
+      "recommendation_api": {}
+    },
+    "window": {
+      "start_inclusive": "2026-11-15T04:07:35.411160+00:00",
+      "end_exclusive": "2026-11-15T04:17:35.411160+00:00",
+      "selection": "Bounded Kafka ingestion-time and request start-time tails"
+    },
+    "coverage": {
+      "kafka_partition_0_tail_capped": true,
+      "kafka_partition_1_tail_capped": true,
+      "recommendation_tail_capped": true
+    },
+    "metadata_observed_at": "2026-11-15T04:17:37.188362+00:00",
+    "reference_sha256": "ef721018ed84de6a6d8447e7d6cfd5259f7c6c541803478f02c654481edb3b3b",
+    "reference_window": {
+      "start_inclusive": "2026-10-28T06:01:58.743088+00:00",
+      "end_exclusive": "2026-10-29T06:01:58.743088+00:00",
+      "selection": "Bounded Kafka ingestion-time and request start-time tails"
+    }
+  }
+}

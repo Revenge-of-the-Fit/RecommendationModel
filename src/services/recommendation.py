@@ -1,17 +1,20 @@
 """Reuse the existing recommendation entry point with persistent resources."""
 
 import logging
+import os
 import sqlite3
 import time
+from pathlib import Path
 
 from cold_start import ColdStartRecommender
 from dataset import MovieDataset
 from models.serving import RecommendationResult
 from models.settings import ServingSettings
 from preferences import ColdStartError
+from provenance import register_serving
 from recommend import recommend_for_user
 from recommender import EaseRecommender
-from services.versions import dataset_version, file_version
+from services.versions import code_version, dataset_version, file_version
 from storage.live import LiveStore, merge_history, read_live_user
 from storage.profiles import content_version
 
@@ -32,12 +35,20 @@ class RecommendationService:
         self.cold_start = cold_start
         self.versions = versions or {}
         self.profile_import_error = None
+        self.provenance_error = None
         self.settings = None
         self.live_worker = None
 
     @classmethod
     def load(cls, settings: ServingSettings) -> "RecommendationService":
+        original = settings.model_path.stat()
         model = EaseRecommender.load(settings.model_path)
+        artifact_version = file_version(settings.model_path)
+        current = settings.model_path.stat()
+        if (original.st_dev, original.st_ino, original.st_size, original.st_mtime_ns) != (
+            current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns,
+        ):
+            raise ValueError("Model artifact changed while loading; retry startup")
         dataset = MovieDataset(settings.data_directory)
         if not set(model.movie_ids).issubset(set(dataset.movies["movie_id"])):
             raise ValueError("The trained model contains movies absent from the catalog")
@@ -51,17 +62,44 @@ class RecommendationService:
             profile_import_error = type(error).__name__
             LOGGER.error("Profile provenance import unavailable (%s)", profile_import_error)
         service = cls(model, dataset, cold_start, versions={
-            "model": file_version(settings.model_path),
+            "model": artifact_version,
             "dataset": dataset_version(settings.data_directory),
         })
         service.profile_import_error = profile_import_error
         service.settings = settings
+        if settings.provenance_directory is not None:
+            try:
+                served, training = register_serving(
+                    settings.provenance_directory, model_version=service.versions["model"],
+                    catalog_version=service.versions["dataset"], ranking=service.ranking_configuration(),
+                    source_version=code_version(Path(__file__).resolve().parents[1]),
+                    source_revision=os.environ.get("APP_REVISION", "unknown"),
+                    model_path=settings.model_path, model=model,
+                )
+                service.versions.update(serving=served)
+                if training:
+                    service.versions.update(training_dataset=training)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                # Leave serving available; do not advertise a receipt we could not write.
+                service.provenance_error = type(error).__name__
+                LOGGER.error("Serving provenance unavailable (%s)", type(error).__name__)
         if settings.live_enabled:
             from services.live_worker import LiveProfileWorker
             with LiveStore(settings.storage_path):
                 pass
             service.live_worker = LiveProfileWorker(settings, cold_start)
         return service
+
+    def ranking_configuration(self) -> dict:
+        """Include any ranking policy parameters used by this service in its identity."""
+        return {
+            "policy": "ease-with-profile-and-popularity-fallback",
+            "top_k": 20,
+            **self.settings.model_dump(include={
+                "live_enabled", "live_source_id", "live_topic", "cold_start_wait_seconds",
+                "recommendation_budget_seconds",
+            }),
+        }
 
     def start(self):
         if self.live_worker is not None:

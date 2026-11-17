@@ -48,10 +48,10 @@ def validate_candidate(candidate, data_directory, model_path, manifest_path, cat
     report = {
         "code_revision": os.environ.get("APP_REVISION", "unknown"),
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "model": {"path": str(model_path), "sha256": sha256(candidate),
+        "model": {"path": str(model_path), "sha256": sha256(candidate), "algorithm": "EASE",
                   "regularization": model.regularization, "min_rating": model.min_rating},
         "catalog": old_manifest.get("catalog", {}),
-        "training": {"data_directory": str(data_directory), "dataset_version": dataset_version(Path(data_directory)), **source},
+        "training": {**source, "data_directory": str(data_directory), "dataset_version": dataset_version(Path(data_directory))},
         "previous_model_sha256": source["reference_model_sha256"],
     }
     return report
@@ -83,6 +83,7 @@ def verify_deployment(manifest_path, storage_path, *, base_url="http://127.0.0.1
     with urlopen(f"{base_url}/recommend/{user_id}", timeout=2) as response:
         body = response.read().decode().strip()
         request_id = response.headers["x-request-id"]
+        served = response.headers.get("x-served-version")
     elapsed = (time.perf_counter() - started) * 1000
     if elapsed >= 600:
         raise ValueError("Recommendation probe exceeded the course's 600 ms deadline")
@@ -106,7 +107,10 @@ def verify_deployment(manifest_path, storage_path, *, base_url="http://127.0.0.1
         raise ValueError(f"Request log was not persisted within 30 seconds (request={request_id}); inspect /health/storage")
     if record.get("versions", {}).get("model") != expected or record.get("status") != 200:
         raise ValueError("No successful request record confirms the candidate was loaded")
+    if served and record["versions"].get("serving") != served:
+        raise ValueError("Response serving version does not match the stored request")
     return {"status": "deployed", "request_id": request_id, "model_version": expected,
+            **({"served_version": served} if served else {}),
             "previous_model_sha256": manifest.get("previous_model_sha256"), "http_ms": round(elapsed, 3),
             "recommendations": len(ids), "data_directory": manifest.get("training", {}).get("data_directory"),
             "training_start": manifest.get("training", {}).get("actual_training_start"),

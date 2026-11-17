@@ -119,7 +119,8 @@ def create_gateway(routing_path=None, *, transport=None, experiment_directory=No
                         "user_id": normalized, "experiment_id": plan["id"],
                         "assigned_arm": arm_for_slot(plan, assigned), "assigned_slot": assigned,
                         "routing_generation": config["generation"], "status": status,
-                        "actual_slot": trace.get("slot"), "served_version": trace.get("version"),
+                        "actual_slot": trace.get("slot"),
+                        "served_version": trace.get("serving" if plan.get("version_kind") == "serving" else "model"),
                         "backend_request_id": trace.get("request_id"),
                     })
                 else:
@@ -148,15 +149,19 @@ def create_gateway(routing_path=None, *, transport=None, experiment_directory=No
                     not item or any(c.isspace() for c in item) for item in ids
                 ):
                     continue
-                trace.update(slot=slot, version=response.headers.get("x-model-version"),
+                trace.update(slot=slot, model=response.headers.get("x-model-version"),
+                             serving=response.headers.get("x-served-version"),
                              request_id=response.headers.get("x-request-id"))
-                return Response(response.content, media_type="text/plain", headers={
+                headers = {
                     "x-request-id": response.headers.get("x-request-id", ""),
                     "x-model-version": response.headers.get("x-model-version", ""),
                     "x-model-slot": slot,
                     "x-assigned-slot": assigned,
                     "x-routing-generation": config["generation"],
-                })
+                }
+                if trace["serving"]:
+                    headers["x-served-version"] = trace["serving"]
+                return Response(response.content, media_type="text/plain", headers=headers)
             except (httpx.HTTPError, TimeoutError):
                 continue
         return PlainTextResponse("Recommendations are unavailable", status_code=503)
