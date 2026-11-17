@@ -35,7 +35,10 @@ def readiness(service: Service) -> dict[str, str]:
 
 @router.get("/health/model")
 def model_version(service: Service) -> dict:
-    return {"status": "ready", "versions": service.versions}
+    result = {"status": "ready", "versions": service.versions}
+    if issue := getattr(service, "provenance_error", None):
+        result["provenance_error"] = issue
+    return result
 
 
 @router.get("/health/storage")
@@ -61,7 +64,10 @@ def recommend(
         LOGGER.error("Could not serve request %s (%s)", request.state.request_id, type(error).__name__)
         raise HTTPException(503, "Recommendations are unavailable") from None
     request.state.recommendation_result = result
+    headers = {"x-model-version": service.versions.get("model", "unknown")}
+    if service.versions.get("serving"):
+        headers["x-served-version"] = service.versions["serving"]
     return PlainTextResponse(
         ",".join(item.movie_id for item in result.recommendations),
-        headers={"x-model-version": service.versions.get("model", "unknown")},
+        headers=headers,
     )

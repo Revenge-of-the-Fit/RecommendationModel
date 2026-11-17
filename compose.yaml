@@ -56,6 +56,7 @@ services:
       APP_REVISION: ${APP_REVISION:-unknown}
       DATA_DIRECTORY: /app/data
       MODEL_PATH: /app/models/slots/blue/recommender.npz
+      PROVENANCE_DIRECTORY: /app/state/provenance
       CACHE_DIRECTORY: /app/state/cache
       LIVE_ENABLED: "1"
       COLD_START_WAIT_SECONDS: ${COLD_START_WAIT_SECONDS:-0.4}
@@ -72,6 +73,7 @@ services:
       - event_logs:/app/state/events
       - live_profiles:/app/state/profiles
       - worker_state:/app/state/worker
+      - provenance:/app/state/provenance
     restart: unless-stopped
     healthcheck:
       test:
@@ -193,6 +195,28 @@ services:
     restart: unless-stopped
     logging: *bounded-logging
 
+  monitoring:
+    build: .
+    profiles: ["monitoring"]
+    command: ["python", "-m", "uvicorn", "monitoring_api:app", "--host", "0.0.0.0", "--port", "9091"]
+    environment:
+      STORAGE_PATH: /app/state/events/events.sqlite3
+      DATA_QUALITY_REFERENCE: ${DATA_QUALITY_REFERENCE:-/app/models/data-quality-reference.json}
+      METADATA_BASE_URL: ${METADATA_BASE_URL:-http://128.2.24.239:8080}
+      MONITORING_SERVER: ${MONITORING_SERVER:-cmu-online-mlip-vm02.andrew.cmu.edu:8082}
+      MONITORING_INTERVAL_SECONDS: ${MONITORING_INTERVAL_SECONDS:-300}
+      MONITORING_EVENT_LIMIT: ${MONITORING_EVENT_LIMIT:-220000}
+      MONITORING_LICENSING_FEES: ${MONITORING_LICENSING_FEES:-}
+    ports:
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - catalog:/app/data:ro
+      - model:/app/models:ro
+      - event_logs:/app/state/events:ro
+      - monitoring:/app/state/monitoring
+    restart: unless-stopped
+    logging: *bounded-logging
+
   profiles-preparation:
     build: .
     profiles: ["profiles"]
@@ -233,3 +257,5 @@ volumes:
   live_profiles:
   worker_state:
   experiment_logs:
+  provenance:
+  monitoring:

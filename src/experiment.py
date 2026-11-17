@@ -39,7 +39,11 @@ def start_experiment(directory, capture_directory, storage_path, *, experiment_i
     heartbeat = json.loads((capture_directory / "capture-status.json").read_text())
     if not timedelta(0) <= clock - utc(heartbeat["updated_at"]) < timedelta(seconds=30):
         raise ValueError("Kafka experiment capture is not current; inspect ingestion before starting")
-    versions = {slot: get_json(url + "/health/model")["versions"]["model"] for slot, url in BACKENDS.items()}
+    loaded = {slot: get_json(url + "/health/model")["versions"] for slot, url in BACKENDS.items()}
+    if any(item.get("serving") for item in loaded.values()) and not all(item.get("serving") for item in loaded.values()):
+        raise ValueError("Both slots must publish serving provenance before registering an experiment")
+    version_kind = "serving" if all(item.get("serving") for item in loaded.values()) else "model"
+    versions = {slot: item[version_kind] for slot, item in loaded.items()}
     connection = readonly(storage_path)
     try:
         partitions = [row[0] for row in connection.execute(
@@ -56,7 +60,8 @@ def start_experiment(directory, capture_directory, storage_path, *, experiment_i
         "enrollment_end": enrollment_end.isoformat(), "follow_up_seconds": follow_up_hours * 3600,
         "observation_end": (enrollment_end + timedelta(hours=follow_up_hours)).isoformat(),
         "control_slot": control_slot, "treatment_percent": 50, "salt": uuid.uuid4().hex,
-        "versions": versions, "control_description": control_description, "treatment_description": treatment_description,
+        "versions": versions, "version_kind": version_kind,
+        "control_description": control_description, "treatment_description": treatment_description,
         "source_id": "cmu-movielog", "topic": "movielog2", "partitions": partitions,
         "fees_source": str(fees_path), "fees_file": "fees.csv.gz" if fees_path.suffix == ".gz" else "fees.csv",
         "fee_column": fee_column, "fees_sha256": sha256(fees_path), "invalid_fee_movies": len(invalid),

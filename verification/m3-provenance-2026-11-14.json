@@ -1,0 +1,41 @@
+{
+  "request_id": "99e1dd9574f244268007f8a5f129d64f",
+  "started_at": "2026-11-13T11:18:06.282256+00:00",
+  "serving_method": "ease",
+  "fallback_reason": null,
+  "profile_reference": null,
+  "recommendation_count": 20,
+  "versions": {
+    "code": "sha256:b130129917ad823c1f24550a09e2a807c2cda069091fc4f40c0d78afd5e4fc0b",
+    "dataset": "sha256:f45b10a6bd359bdeb5d0ea3aaa0b188fb3748e55b5e11c7caa5035dba2d175b8",
+    "model": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "profile": null
+  },
+  "manifest": "/app/models/updates/20261113T111208Z-3885278/artifact-manifest.json",
+  "ranking": null,
+  "model": {
+    "algorithm": "EASE",
+    "regularization": 100.0,
+    "min_rating": 6,
+    "version": "sha256:f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+    "verified_artifact": "/app/models/updates/20261113T111208Z-3885278/candidate.npz"
+  },
+  "training": {
+    "dataset_version": "sha256:5d1ab60b356dcdea22883b00ccbe154936ccab5f042bc4a3a9d36405d4ec9789",
+    "directory": "/app/models/updates/20261113T111208Z-3885278/data",
+    "files": {
+      "events.csv.gz": "63c10192ee2f3d937641eefca75d1a602ed1ecc7aa366530742b716ed954188a",
+      "movies.csv.gz": "817a9a7dc7eab182cd7e971c7ff1b870aad71db0cd4f5e0d5e7e1b7ce5e5dcb9",
+      "users.csv.gz": "de6811cb3bb9398f6f8c332b28dc72d9913162ba4471dc20bd686b0135557eb5"
+    },
+    "pipeline_revision": "dd657753cf83d152670e203b2d7d18594bd9b209",
+    "file_checks": {
+      "events.csv.gz": true,
+      "movies.csv.gz": true,
+      "users.csv.gz": true
+    },
+    "dataset_verified": true,
+    "git_revision_recorded": true
+  },
+  "training_lineage_verified": true
+}

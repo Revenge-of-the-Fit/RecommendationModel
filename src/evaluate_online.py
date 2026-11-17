@@ -70,6 +70,10 @@ def load_licensing_fees(path: Path, *, fee_column="license_cost"):
 
 def licensing_cost(path: Path, viewing_units: set[tuple[int, str]], *, fee_column="license_cost") -> dict:
     fees, invalid_fees = load_licensing_fees(path, fee_column=fee_column)
+    return summarize_licensing(fees, invalid_fees, viewing_units)
+
+
+def summarize_licensing(fees, invalid_fees, viewing_units: set[tuple[int, str]]) -> dict:
     counts = Counter({
         "observed_units": len(viewing_units), "covered_units": 0,
         "missing_catalog_units": 0, "missing_fee_units": 0, "invalid_fee_units": 0,

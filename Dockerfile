@@ -13,7 +13,7 @@ COPY src src
 COPY scripts scripts
 
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /app/data /app/models /app/state/cache /app/state/events /app/state/archives /app/state/profiles /app/state/worker /app/state/experiments \
+    && mkdir -p /app/data /app/models /app/state/cache /app/state/events /app/state/archives /app/state/profiles /app/state/worker /app/state/experiments /app/state/provenance /app/state/monitoring \
     && chown -R app:app /app
 
 USER app

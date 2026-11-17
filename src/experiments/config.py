@@ -23,6 +23,10 @@ def validate_plan(plan):
         not isinstance(v, str) or not v for v in plan["versions"].values()
     ):
         raise ValueError("Record both served version identifiers before starting")
+    if plan.get("version_kind", "model") not in ("model", "serving"):
+        raise ValueError("Unrecognized experiment version kind")
+    if plan.get("version_kind") == "serving" and len(set(plan["versions"].values())) != 2:
+        raise ValueError("An experiment requires two distinct serving configurations")
     if not plan["partitions"] or any(type(p) is not int or p < 0 for p in plan["partitions"]):
         raise ValueError("Declare the source partitions before starting")
     return plan
