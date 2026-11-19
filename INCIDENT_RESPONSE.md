@@ -21,7 +21,7 @@ An incident is any event that stops, degrades or exposes the service or its data
 
 ## Detection
 
-- **Automated:** the Grafana alert **Gateway unreachable** posts to the team Slack channel with `<!channel>` when the public gateway's `/health/ready` probe fails for 2 minutes (or no probe data arrives). The message names the trigger and links this plan and the dashboard.
+- **Automated:** the Grafana alert **Gateway unreachable** posts to the team Slack channel with an `@channel` mention when the public gateway's `/health/ready` probe fails for 2 minutes (or no probe data arrives). The message names the trigger and links this plan and the dashboard.
 - **Dashboard:** Grafana `M3 Production Monitoring` (uid `m3-production`) shows availability, online HitRate@20, license and LLM cost, drift, and collector health.
 - **Manual:** anyone who notices a problem (a teammate, the mentor, management) reports it in the same Slack channel. If it meets the bar of an incident, the incident is declared at that point. Issues that don't meet the bar for declaring an incident can be added as a bug ticket in GitHub.
 - Known gap: We don't have external health checks to alert on if the whole VM or the monitoring containers die. In this event, alerts will not fire.

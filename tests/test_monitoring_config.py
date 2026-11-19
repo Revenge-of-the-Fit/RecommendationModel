@@ -163,9 +163,14 @@ class GrafanaProvisioningTests(unittest.TestCase):
         self.assertFalse(receiver.get("disableResolveMessage", False))
         self.assertEqual(receiver["settings"]["url"], "$__env{SLACK_WEBHOOK_URL}")
 
-    def test_message_template_pings_channel(self):
+    def test_contact_point_mentions_the_channel_with_grafanas_own_setting(self):
+        receiver = load_yaml(f"{PROVISIONING}/alerting/contact-points.yml")["contactPoints"][0]["receivers"][0]
+        self.assertEqual(receiver["settings"]["mentionChannel"], "channel")
+
+    def test_message_template_does_not_hand_roll_the_mention(self):
         text = load_yaml(f"{PROVISIONING}/alerting/templates.yml")["templates"][0]["template"]
-        self.assertIn("<!channel>", text)
+        # mentionChannel already adds the broadcast mention; a second one would double-ping.
+        self.assertNotIn("<!channel>", text)
         self.assertNotIn("@channel", text)
         self.assertIn("runbook_url", text)
         self.assertIn("/d/m3-production", text)

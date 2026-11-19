@@ -4,7 +4,7 @@ templates:
     name: m3_alert
     template: |
       {{ define "m3_title" }}[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}{{ end }}
-      {{ define "m3_alert" }}{{ if eq .Status "firing" }}<!channel> {{ end }}{{ range .Alerts }}*{{ .Labels.alertname }}* is {{ .Status }}
+      {{ define "m3_alert" }}{{ range .Alerts }}*{{ .Labels.alertname }}* is {{ .Status }}
       Trigger: {{ .Annotations.trigger }}
       What to do: {{ .Annotations.summary }}
       Runbook: {{ .Annotations.runbook_url }}
