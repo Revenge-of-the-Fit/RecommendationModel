@@ -118,12 +118,15 @@ def freeze_fees(catalog, storage, output, metadata_url):
 
 
 def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, refresh=True,
-            penalty=PENALTY, rating_decline_margin=0.5):
+            penalty=PENALTY, rating_decline_margin=0.5, enrollment_hours=7, follow_up_hours=1):
     if isinstance(penalty, bool) or not math.isfinite(penalty) or penalty <= 0:
         raise ValueError("Penalty must be positive and finite")
     if (isinstance(rating_decline_margin, bool) or not math.isfinite(rating_decline_margin)
             or not 0 <= rating_decline_margin <= 9):
         raise ValueError("Rating decline margin must be finite and between 0 and 9 points")
+    if any(isinstance(hours, bool) or not math.isfinite(hours) or hours <= 0
+           for hours in (enrollment_hours, follow_up_hours)):
+        raise ValueError("Enrollment and follow-up hours must be positive and finite")
     directory = Path(directory)
     archive = assets_path(directory, experiment_id)
     routing = read_routing(directory / "routing.json")
@@ -174,7 +177,7 @@ def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, 
                 "missing_fee_criterion": "If any watched fees are unknown, the full-spending target is not established; report conditional known-fee estimates separately",
                 "interpretation": "Fixed before enrollment; no retuning or early stopping based on significance",
             },
-            "enrollment_hours": 7, "follow_up_hours": 1, "control_slot": "blue",
+            "enrollment_hours": enrollment_hours, "follow_up_hours": follow_up_hours, "control_slot": "blue",
             "control_description": "Current EASE, no licensing penalty",
             "treatment_description": (
                 f"Same EASE weights; eligible personalized score minus {penalty:g} * fee_USD before top 20; "
@@ -252,7 +255,8 @@ def start(directory, capture_directory, storage_path, experiment_id, *, clock=No
     clock = clock or datetime.now(timezone.utc)
     plan = start_experiment(
         directory, capture_directory, storage_path, experiment_id=experiment_id,
-        start=clock + timedelta(minutes=3), enrollment_hours=7, follow_up_hours=1,
+        start=clock + timedelta(minutes=3), enrollment_hours=spec["enrollment_hours"],
+        follow_up_hours=spec["follow_up_hours"],
         control_slot="blue", control_description=spec["control_description"],
         treatment_description=spec["treatment_description"], fees_path=archive / "fees.csv",
         fee_column="license_cost", clock=clock,
@@ -309,6 +313,8 @@ def main(argv=None):
     preparation.add_argument("--no-refresh", action="store_true", help="Use an already broadened validated fee snapshot")
     preparation.add_argument("--penalty", type=float, default=PENALTY, help="Fixed EASE score penalty per licensing dollar")
     preparation.add_argument("--rating-decline-margin", type=float, default=0.5, help="Maximum acceptable mean rating decline, frozen before enrollment")
+    preparation.add_argument("--enrollment-hours", type=float, default=7)
+    preparation.add_argument("--follow-up-hours", type=float, default=1)
     staging = commands.add_parser("stage")
     staging.add_argument("--id", required=True)
     staging.add_argument("--slot", choices=("blue", "green"), required=True)
@@ -323,7 +329,8 @@ def main(argv=None):
         if args.command == "prepare":
             result = prepare(args.directory, args.id, args.fees, args.storage_path, args.metadata_url,
                              refresh=not args.no_refresh, penalty=args.penalty,
-                             rating_decline_margin=args.rating_decline_margin)
+                             rating_decline_margin=args.rating_decline_margin,
+                             enrollment_hours=args.enrollment_hours, follow_up_hours=args.follow_up_hours)
         elif args.command == "stage":
             result = stage_slot(args.directory, args.id, args.slot)
         elif args.command == "start":

@@ -18,7 +18,7 @@ from storage.database import open_database
 from storage.events import EventStore, KafkaEnvelope
 
 
-@pytest.fixture(params=[0.01, 0.06])
+@pytest.fixture(params=[(0.01, 7), (0.04, 3)])
 def prepared(tmp_path, request):
     models = tmp_path / "models"
     for slot in ("blue", "green"):
@@ -32,7 +32,8 @@ def prepared(tmp_path, request):
     digest = sha256(models / "slots/blue/recommender.npz")
     with patch("license_experiment.get_json", return_value={"versions": {"model": "sha256:" + digest}}):
         spec = prepare(models, "license-test", fees, tmp_path / "unused", "http://metadata",
-                       refresh=False, penalty=request.param, rating_decline_margin=0.5)
+                       refresh=False, penalty=request.param[0], rating_decline_margin=0.5,
+                       enrollment_hours=request.param[1], follow_up_hours=1)
     return models, spec
 
 
@@ -51,7 +52,7 @@ def test_preparation_does_not_change_serving_or_register_a_run_and_staging_is_in
         stage_slot(models, spec["id"], "green")
 
 
-def test_start_fixes_eight_hours_same_model_and_policy_reference(prepared, tmp_path):
+def test_start_fixes_saved_duration_same_model_and_policy_reference(prepared, tmp_path):
     models, spec = prepared
     clock = datetime(2026, 11, 20, tzinfo=timezone.utc)
     control = {"policy": "ease-with-profile-and-popularity-fallback", "top_k": 20}
@@ -68,8 +69,10 @@ def test_start_fixes_eight_hours_same_model_and_policy_reference(prepared, tmp_p
         assert start(models, tmp_path / "capture", tmp_path / "events", spec["id"], clock=clock) == {"registered": True}
         args = register.call_args.kwargs
         assert args["start"] == clock + timedelta(minutes=3)
-        assert args["enrollment_hours"] + args["follow_up_hours"] == 8
-        assert args["enrollment_hours"] == 7 and args["follow_up_hours"] == 1
+        assert args["enrollment_hours"] == spec["enrollment_hours"]
+        assert args["follow_up_hours"] == spec["follow_up_hours"] == 1
+        assert args["enrollment_hours"] + args["follow_up_hours"] == (
+            4 if spec["penalty_per_usd"] == 0.04 else 8)
         assert args["expected_versions"] == {"blue": "control", "green": "treatment"}
         assert args["policy_reference"] == spec
         assert spec["decision_rule"]["maximum_rating_decline_points"] == 0.5
@@ -88,7 +91,7 @@ def test_start_fixes_eight_hours_same_model_and_policy_reference(prepared, tmp_p
         assert register.call_count == 1
 
 
-def test_real_registration_saves_policy_and_split_ends_at_eight_hour_boundary(prepared, tmp_path):
+def test_real_registration_saves_policy_and_split_ends_at_saved_boundary(prepared, tmp_path):
     models, spec = prepared
     clock = datetime(2026, 11, 20, tzinfo=timezone.utc)
     capture = tmp_path / "capture"
@@ -113,12 +116,13 @@ def test_real_registration_saves_policy_and_split_ends_at_eight_hour_boundary(pr
     with patch("license_experiment.get_json", side_effect=health), patch("experiment.get_json", side_effect=health):
         plan = start(models, capture, db, spec["id"], clock=clock)
     beginning = clock + timedelta(minutes=3)
-    assert datetime.fromisoformat(plan["enrollment_end"]) == beginning + timedelta(hours=7)
-    assert datetime.fromisoformat(plan["observation_end"]) == beginning + timedelta(hours=8)
+    duration = spec["enrollment_hours"] + spec["follow_up_hours"]
+    assert datetime.fromisoformat(plan["enrollment_end"]) == beginning + timedelta(hours=spec["enrollment_hours"])
+    assert datetime.fromisoformat(plan["observation_end"]) == beginning + timedelta(hours=duration)
     config = read_routing(models / "routing.json")
     assert active_plan(config, beginning - timedelta(microseconds=1)) is None
-    assert active_plan(config, beginning + timedelta(hours=8) - timedelta(microseconds=1)) == plan
-    assert active_plan(config, beginning + timedelta(hours=8)) is None
+    assert active_plan(config, beginning + timedelta(hours=duration) - timedelta(microseconds=1)) == plan
+    assert active_plan(config, beginning + timedelta(hours=duration)) is None
     saved = json.loads((models / "experiments" / spec["id"] / "plan.json").read_text())
     assert saved["ranking_policy_reference"] == spec
     assert saved["versions"] == {"blue": "blue", "green": "green"}
@@ -154,6 +158,7 @@ def test_original_unsealed_specification_remains_compatible(prepared):
     ("penalty", 0), ("penalty", -0.01), ("penalty", float("nan")), ("penalty", float("inf")),
     ("rating_decline_margin", -0.5), ("rating_decline_margin", 10),
     ("rating_decline_margin", float("nan")),
+    ("enrollment_hours", 0), ("enrollment_hours", float("nan")), ("follow_up_hours", -1),
 ])
 def test_invalid_fixed_settings_fail_before_preparation(tmp_path, setting, value):
     with pytest.raises(ValueError):

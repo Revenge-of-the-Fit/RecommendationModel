@@ -83,6 +83,10 @@ does not guarantee complete future-watch coverage. The temporary unpenalized-gre
 rollout step still uses `LICENSING_TREATMENT_PENALTY=0`; the final treatment
 recreation must use **0.06**, not the overlay's backward-compatible 0.01 default.
 Allow up to 30 minutes per backend for the shared profile-cache import.
+For the four-hour follow-up run, use coefficient **0.04** and pass
+`--enrollment-hours 3 --follow-up-hours 1 --penalty 0.04` to preparation;
+set `LICENSING_TREATMENT_PENALTY=0.04` for the final green recreation.
+Duration is frozen in the specification and honored by the launcher.
 Run `start --id license-v2` only after a separately approved readiness check.
 Do not overwrite, re-label or pool v1 results with the stronger policy's results.
 
