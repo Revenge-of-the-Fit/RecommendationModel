@@ -2,11 +2,13 @@
 import argparse
 import csv
 import json
+import logging
 import os
 import re
 import shutil
 import sqlite3
 import tempfile
+from collections import Counter, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,11 +20,13 @@ from experiment import start_experiment
 from monitoring import readonly
 from routing import BACKENDS, read_routing, write_json
 from recommender import EaseRecommender
-from services.metadata import MetadataRateLimiter
+from services.metadata import MetadataRateLimiter, split_rejected_batch
 from services.metadata_http import MetadataHttpFetcher
 
 
 PENALTY = 0.01
+MAX_FEE_REQUESTS = 256
+LOGGER = logging.getLogger(__name__)
 
 
 def assets_path(directory, experiment_id):
@@ -43,22 +47,37 @@ def freeze_fees(catalog, storage, output, metadata_url):
         if not partitions:
             raise ValueError("No Kafka partitions available for fee preparation")
         movies = set(fees)
+        counts = Counter()
         for partition in partitions:
-            movies.update(row[0] for row in connection.execute("""
-                SELECT movie_id FROM kafka_events
-                WHERE source_id='cmu-movielog' AND topic='movielog2' AND partition=?
-                ORDER BY offset DESC LIMIT 100000
+            counts.update(row[0] for row in connection.execute("""
+                SELECT movie_id FROM (
+                    SELECT movie_id,event_type,parse_status FROM kafka_events
+                    WHERE source_id='cmu-movielog' AND topic='movielog2' AND partition=?
+                    ORDER BY offset DESC LIMIT 100000
+                ) WHERE parse_status='parsed' AND event_type IN ('watch','rating')
             """, (partition,)) if row[0])
+        movies.update(counts)
     finally:
         connection.close()
-    missing = sorted(movie for movie in movies if fees.get(movie) is None)
+    missing = sorted((movie for movie in movies if fees.get(movie) is None),
+                     key=lambda movie: (-counts[movie], movie))
     limiter = MetadataRateLimiter(1)
     fetched = 0
+    requests, rejected = 0, Counter()
+    batches = deque(missing[index:index + 25] for index in range(0, len(missing), 25))
     with MetadataHttpFetcher(metadata_url, timeout=10) as client:
-        for index in range(0, len(missing), 25):
-            batch_ids = missing[index:index + 25]
+        while batches and requests < MAX_FEE_REQUESTS:
+            batch_ids = batches.popleft()
             limiter.wait()
             batch = client("movie", batch_ids)
+            requests += 1
+            if split := split_rejected_batch(batch, batch_ids):
+                batches.extendleft(reversed(split))
+                continue
+            if len(batch_ids) == 1 and batch.http_status in (400, 404):
+                rejected[str(batch.http_status)] += 1
+                fees[batch_ids[0]] = None
+                continue
             if batch.error_type or batch.http_status != 200:
                 raise ValueError(f"Fee preparation failed: metadata HTTP {batch.http_status}, {batch.error_type}")
             # Reuse the canonical CSV fee validator for numeric and missing values.
@@ -74,6 +93,12 @@ def freeze_fees(catalog, storage, output, metadata_url):
                 resolved, _ = load_licensing_fees(batch_file)
             fees.update(resolved)
             fetched += sum(value is not None for value in resolved.values())
+    unresolved = sum(fees.get(movie) is None for movie in movies)
+    if rejected or batches or unresolved:
+        LOGGER.warning(
+            "Fee preparation: unknown=%s, rejected_movie_requests=%s, deferred_movies=%s, requests=%s/%s",
+            unresolved, dict(rejected), sum(map(len, batches)), requests, MAX_FEE_REQUESTS,
+        )
     with Path(output).open("w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(["movie_id", "license_cost"])
@@ -84,6 +109,9 @@ def freeze_fees(catalog, storage, output, metadata_url):
         "partitions": partitions, "resolved_additional_fees": fetched,
         "movies": len(movies), "unknown_fees": sum(fees.get(movie) is None for movie in movies),
         "invalid_original_fees": len(invalid),
+        "metadata_requests": requests, "max_metadata_requests": MAX_FEE_REQUESTS,
+        "rejected_movie_requests": dict(rejected),
+        "deferred_movies": sum(map(len, batches)),
         "limitation": "Recent movie coverage does not guarantee coverage of future watches; unknowns remain unknown.",
     }
 

@@ -98,8 +98,11 @@ license prepare --id "$LICENSE_EXPERIMENT_ID"
 training manifest. It broadens catalog prices using movie IDs from an indexed
 tail of up to 100,000 retained events per partition and rate-limited course movie
 metadata requests, then freezes the fee snapshot. Inspect the printed unknown-fee
-count; recent coverage cannot guarantee coverage of future watches. HTTP failures
-stop preparation. An existing validated snapshot can instead be supplied with
+count; recent coverage cannot guarantee coverage of future watches. Rejected
+batches are split to isolate unknown movie IDs. Individual HTTP 400/404 responses
+remain unknown; server/transport failures stop preparation. Lookups prioritize
+frequently observed movies and are capped at 256 requests, with rejected/deferred
+counts reported explicitly. An existing validated snapshot can instead be supplied with
 `--fees /app/models/PATH.csv --no-refresh`.
 
 Assets are retained under `/app/models/license-policies/<id>/`. Use a new ID for

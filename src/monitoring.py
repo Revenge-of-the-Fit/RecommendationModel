@@ -12,7 +12,7 @@ from pathlib import Path
 
 from check_data_quality import check_recent_quality
 from evaluate_online import load_licensing_fees, summarize_licensing, subsequent_hit, utc
-from services.metadata import MetadataRateLimiter
+from services.metadata import MetadataRateLimiter, split_rejected_batch
 from services.metadata_http import MetadataHttpFetcher
 from storage.event_payloads import parsed_event
 from storage.payloads import load_json
@@ -226,9 +226,8 @@ class MovieFeeCache:
                     batch = client("movie", selected)
                     if batch.error_type:
                         errors[str(batch.http_status) if batch.http_status else batch.error_type] += 1
-                        if batch.http_status in (400, 404, 414) and len(selected) > 1:
-                            middle = len(selected) // 2
-                            batches.extend((selected[:middle], selected[middle:]))
+                        if split := split_rejected_batch(batch, selected):
+                            batches.extend(split)
                             continue
                         if len(selected) > 1:
                             continue  # Retry temporary batch failures in a later collection.

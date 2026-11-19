@@ -129,7 +129,8 @@ def test_changed_frozen_fees_cannot_be_started(prepared, tmp_path):
             start(models, tmp_path / "capture", tmp_path / "events", spec["id"])
 
 
-def test_fee_refresh_adds_recent_movies_but_keeps_unknown_fees_unknown(tmp_path):
+@pytest.fixture
+def fee_inputs(tmp_path):
     db = tmp_path / "events.sqlite3"
     connection = open_database(db)
     with connection:
@@ -141,15 +142,45 @@ def test_fee_refresh_adds_recent_movies_but_keeps_unknown_fees_unknown(tmp_path)
         store.save_event(envelope, parse_event(envelope.value))
     catalog, output = tmp_path / "catalog.csv", tmp_path / "frozen.csv"
     catalog.write_text("movie_id,license_cost\nknown,0.2\nunknown,\n")
+    return catalog, db, output
+
+
+@pytest.mark.parametrize("reject_batch", [False, True])
+def test_fee_refresh_adds_recent_movies_but_keeps_unknown_fees_unknown(fee_inputs, reject_batch):
+    catalog, db, output = fee_inputs
     batch = MetadataBatch(200, records={"new": {"id": "new", "cost": 0.4},
                                       "unknown": {"id": "unknown", "cost": -1}})
+    def fetch(kind, ids):
+        if reject_batch and (len(ids) > 1 or ids == ["unknown"]):
+            return MetadataBatch(400, error_type="HttpError")
+        return MetadataBatch(200, records={movie: batch.records[movie] for movie in ids})
     with patch("license_experiment.MetadataHttpFetcher") as fetcher:
-        fetcher.return_value.__enter__.return_value.return_value = batch
+        fetcher.return_value.__enter__.return_value.side_effect = fetch
         result = freeze_fees(catalog, db, output, "http://metadata")
     with output.open() as handle:
         fees = {row["movie_id"]: row["license_cost"] for row in csv.DictReader(handle)}
     assert fees == {"known": "0.2", "new": "0.4", "unknown": ""}
     assert result["resolved_additional_fees"] == 1 and result["unknown_fees"] == 1
+    assert result["rejected_movie_requests"] == ({"400": 1} if reject_batch else {})
+
+
+@pytest.mark.parametrize("status", [500, None])
+def test_fee_refresh_still_stops_on_server_or_transport_errors(fee_inputs, status):
+    catalog, db, output = fee_inputs
+    with patch("license_experiment.MetadataHttpFetcher") as fetcher:
+        fetcher.return_value.__enter__.return_value.return_value = MetadataBatch(status, error_type="HttpError")
+        with pytest.raises(ValueError, match="Fee preparation failed"):
+            freeze_fees(catalog, db, output, "http://metadata")
+    assert not output.exists()
+
+
+def test_fee_refresh_budget_is_explicit_and_unresolved_prices_remain_unknown(fee_inputs, caplog):
+    catalog, db, output = fee_inputs
+    with patch("license_experiment.MetadataHttpFetcher") as fetcher, patch("license_experiment.MAX_FEE_REQUESTS", 1):
+        fetcher.return_value.__enter__.return_value.return_value = MetadataBatch(400, error_type="HttpError")
+        result = freeze_fees(catalog, db, output, "http://metadata")
+    assert result["metadata_requests"] == 1 and result["deferred_movies"] == 2
+    assert result["unknown_fees"] == 2 and "deferred_movies=2" in caplog.text
 
 
 def test_preparation_refuses_reuse_of_saved_assets(prepared, tmp_path):
