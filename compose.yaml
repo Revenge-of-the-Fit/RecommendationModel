@@ -244,6 +244,11 @@ services:
   grafana:
     image: grafana/grafana:13.1.10
     profiles: ["monitoring"]
+    # An empty admin password would silently leave the default admin/admin login on a published port.
+    entrypoint:
+      - sh
+      - -c
+      - '[ -n "$$GF_SECURITY_ADMIN_PASSWORD" ] || { echo "GRAFANA_ADMIN_PASSWORD is not set" >&2; exit 1; }; exec /run.sh'
     depends_on:
       - prometheus
     environment:

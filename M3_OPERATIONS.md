@@ -67,7 +67,7 @@ sudo docker compose --project-name recommendationmodel --profile monitoring \
 
 ## Incident drill
 
-The drill deliberately stops the public gateway, waits for the **Gateway unreachable** alert, asks a teammate to confirm the Slack message arrived, restarts the gateway and checks recovery ([`scripts/incident_drill.py`](scripts/incident_drill.py), plan in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md)). Run it once, outside a model update, after announcing it in the team channel. The gateway is restarted even if the drill fails part-way.
+The drill deliberately stops the public gateway, waits for the **Gateway unreachable** alert, restarts the gateway as soon as the alert has fired, then asks a teammate to confirm the Slack message arrived and checks recovery ([`scripts/incident_drill.py`](scripts/incident_drill.py), plan in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md)). Run it once, outside a model update, after announcing it in the team channel. The gateway is also restarted if the drill fails, is interrupted or the SSH session drops, but run it inside `tmux` anyway. It refuses to start the outage unless Grafana answers and the alert is currently inactive.
 
 ```bash
 cd /home/production
@@ -76,3 +76,5 @@ sudo --preserve-env=DRILL_GRAFANA_PASSWORD python3 scripts/incident_drill.py --c
 ```
 
 It writes `verification/m3-drill-<date>.md` with timestamped events: gateway stopped, alert firing, alert received by a named teammate, gateway started, readiness and recommendation checks passed, alert resolved. Add the Slack and Grafana screenshots and the `python src/monitoring.py` availability output for the same window next to it.
+
+Grafana refuses to start without `GRAFANA_ADMIN_PASSWORD`. The password is only applied when Grafana first creates its database, so if the `grafana_data` volume was initialised earlier, set it explicitly: `sudo docker compose --project-name recommendationmodel exec grafana grafana cli admin reset-admin-password '<password>'`.

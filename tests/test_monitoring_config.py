@@ -52,6 +52,12 @@ class ComposeMonitoringTests(unittest.TestCase):
         self.assertEqual(str(environment["GF_AUTH_ANONYMOUS_ENABLED"]).lower(), "false")
         self.assertIn("${GRAFANA_ADMIN_PASSWORD:-", environment["GF_SECURITY_ADMIN_PASSWORD"])
 
+    def test_grafana_refuses_to_start_without_an_admin_password(self):
+        entrypoint = " ".join(self.services["grafana"]["entrypoint"])
+        self.assertIn("GF_SECURITY_ADMIN_PASSWORD", entrypoint)
+        self.assertIn("exit 1", entrypoint)
+        self.assertIn("exec /run.sh", entrypoint)
+
     def test_grafana_root_url_is_configurable_for_alert_links(self):
         environment = self.services["grafana"]["environment"]
         self.assertIn("${GRAFANA_ROOT_URL:-", environment["GF_SERVER_ROOT_URL"])
@@ -115,6 +121,13 @@ class GrafanaProvisioningTests(unittest.TestCase):
         for category in ("Availability", "Quality", "Cost", "Drift"):
             with self.subTest(category=category):
                 self.assertIn(category, titles)
+
+    def test_stat_panels_show_the_latest_sample_so_stale_data_is_visible(self):
+        stats = [panel for panel in dashboard()["panels"] if panel["type"] == "stat"]
+        self.assertTrue(stats)
+        for panel in stats:
+            with self.subTest(panel=panel["title"]):
+                self.assertEqual(panel["options"]["reduceOptions"]["calcs"], ["last"])
 
     def test_dashboard_identity(self):
         board = dashboard()

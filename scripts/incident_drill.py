@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Incident drill: stop the public gateway, wait for the Slack alert, recover, and record evidence.
 
-Standard library only, so it runs on the VM host. The gateway is always restarted, even if the
-drill fails part-way. Run it once, after announcing it in the team Slack channel:
+Standard library only, so it runs on the VM host. The gateway is restarted as soon as the alert has
+fired, and also on any failure, Ctrl-C, SIGTERM or dropped SSH session. Run it once, inside tmux or
+screen, after announcing it in the team Slack channel:
 
     sudo --preserve-env=DRILL_GRAFANA_PASSWORD python3 scripts/incident_drill.py --confirm-stop-gateway
 """
@@ -10,6 +11,7 @@ import argparse
 import base64
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -55,6 +57,22 @@ def render_evidence(events: list[tuple[str, str]]) -> str:
     return "\n".join(rows) + "\n"
 
 
+def gateway_command(project: str, action: str) -> list[str]:
+    """`start` is the exact inverse of `stop`; it needs no compose file and never recreates the container."""
+    if action not in ("stop", "start"):
+        raise ValueError(f"unsupported gateway action {action!r}")
+    return ["docker", "compose", "--project-name", project, action, "gateway"]
+
+
+def install_signal_handlers() -> None:
+    """Turn SIGHUP (dropped SSH session) and SIGTERM into SystemExit so the cleanup in run_drill runs."""
+    def stop(signum, frame):
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, stop)
+
+
 @dataclass
 class DrillDeps:
     stop_gateway: Callable[[], None]
@@ -85,32 +103,54 @@ def run_drill(deps: DrillDeps) -> DrillResult:
         result.events.append((stamp, text))
 
     def wait(check, timeout, ok, failed) -> bool:
+        errors = []
+
+        def safe() -> bool:
+            try:
+                return check()
+            except Exception as error:  # Grafana restarting etc.: keep waiting; KeyboardInterrupt/SystemExit still propagate
+                errors.append(type(error).__name__)
+                return False
+
         try:
-            waited = wait_until(check, timeout, deps.interval, sleep=deps.sleep, clock=deps.clock)
+            waited = wait_until(safe, timeout, deps.interval, sleep=deps.sleep, clock=deps.clock)
         except TimeoutError:
             note(failed)
             result.success = False
             return False
+        finally:
+            if errors:
+                note(f"{len(errors)} check error(s) retried ({errors[-1]})")
         note(ok.format(seconds=waited))
         return True
 
     note("drill started")
-    deps.stop_gateway()
-    note("gateway stopped")
+    # Fail before any outage if Grafana is unreachable, or if the alert is already firing (a false detection).
+    state = deps.alert_state()
+    if state != "inactive":
+        note(f"aborted: alert is already {state}; nothing was stopped")
+        result.success = False
+        return result
     try:
+        deps.stop_gateway()
+        note("gateway stopped")
         fired = wait(lambda: deps.alert_state() == "firing", deps.alert_timeout,
                      "alert firing ({seconds:.0f}s after the gateway stopped)",
                      f"alert did not fire within {deps.alert_timeout:.0f}s")
-        if fired:
-            receiver = deps.ask_receiver().strip()
-            if receiver:
-                note(f"Slack alert received by {receiver}")
-            else:
-                note("Slack alert receipt NOT confirmed by a teammate")
-                result.success = False
     finally:
+        # Restart as soon as detection is proven (or on any failure/interrupt); never wait for a human while down.
         deps.start_gateway()
         note("gateway started")
+    if fired:
+        try:
+            receiver = deps.ask_receiver().strip()
+        except EOFError:
+            receiver = ""
+        if receiver:
+            note(f"Slack alert received by {receiver}")
+        else:
+            note("Slack alert receipt NOT confirmed by a teammate")
+            result.success = False
     wait(deps.gateway_ready, deps.recovery_timeout, "ready check passed ({seconds:.0f}s after start)",
          "ready check did not pass in time")
     wait(deps.recommendation_ok, deps.recovery_timeout, "recommendation check passed",
@@ -148,10 +188,11 @@ def main(argv: list[str] | None = None) -> int:
         print("Set DRILL_GRAFANA_PASSWORD (a Grafana viewer or admin password).", file=sys.stderr)
         return 2
     user = os.environ.get("DRILL_GRAFANA_USER", "admin")
-    compose = ["docker", "compose", "--project-name", args.project]
+    os.chdir(Path(__file__).resolve().parents[1])  # relative evidence path no longer depends on where this was run
+    install_signal_handlers()
     deps = DrillDeps(
-        stop_gateway=lambda: subprocess.run([*compose, "stop", "gateway"], check=True),
-        start_gateway=lambda: subprocess.run([*compose, "up", "-d", "--no-deps", "gateway"], check=True),
+        stop_gateway=lambda: subprocess.run(gateway_command(args.project, "stop"), check=True),
+        start_gateway=lambda: subprocess.run(gateway_command(args.project, "start"), check=True),
         alert_state=lambda: alert_state(args.grafana_url, args.alert_title, user=user, password=password),
         gateway_ready=lambda: _http_ok(args.gateway_url + "/health/ready"),
         recommendation_ok=lambda: _http_ok(args.gateway_url + "/recommend/1", need_body=True),

@@ -107,6 +107,12 @@ class IncidentPlanTests(unittest.TestCase):
         self.assertRegex(after, r"(?i)owner")
         self.assertRegex(after, r"(?i)due date")
 
+    def test_llm_mitigation_clears_both_keys_and_restarts_one_slot_at_a_time(self):
+        mitigations = section(self.text, "## Quick mitigations")
+        self.assertIn("OPENAI_API_KEY", mitigations)
+        self.assertIn("OPENAI_TOKEN", mitigations)
+        self.assertRegex(mitigations, r"(?i)one slot at a time")
+
     def test_detection_links_the_alert_and_dashboard(self):
         detection = section(self.text, "## Detection")
         self.assertIn("Gateway unreachable", detection)

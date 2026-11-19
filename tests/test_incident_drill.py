@@ -1,6 +1,8 @@
 """Incident drill helper: timing, alert polling, evidence, and the safety net."""
 import io
 import json
+import signal
+import subprocess
 import sys
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -113,7 +115,7 @@ def make_deps(*, alert_fires=True, receiver="Sam", log=None):
     return drill.DrillDeps(
         stop_gateway=stop, start_gateway=start_gateway, alert_state=alert_state,
         gateway_ready=lambda: not state["stopped"], recommendation_ok=lambda: not state["stopped"],
-        ask_receiver=lambda: receiver,
+        ask_receiver=lambda: (log.append("ask"), receiver)[1],
         now=lambda: start + timedelta(seconds=fake.now), sleep=fake.sleep, clock=fake.clock,
         alert_timeout=60, recovery_timeout=60, interval=5,
     ), log
@@ -124,7 +126,7 @@ class RunDrillTests(unittest.TestCase):
         deps, log = make_deps()
         result = drill.run_drill(deps)
         self.assertTrue(result.success)
-        self.assertEqual(log, ["stop", "start"])
+        self.assertEqual(log, ["stop", "start", "ask"])  # gateway is back up before anyone is asked anything
         text = " | ".join(event for _, event in result.events)
         for expected in ("gateway stopped", "alert firing", "received by Sam", "gateway started", "ready check passed",
                          "recommendation check passed", "alert resolved"):
@@ -144,15 +146,89 @@ class RunDrillTests(unittest.TestCase):
         deps, log = make_deps(receiver="")
         result = drill.run_drill(deps)
         self.assertFalse(result.success)
-        self.assertEqual(log, ["stop", "start"])
+        self.assertEqual(log, ["stop", "start", "ask"])
         self.assertIn("NOT confirmed", " | ".join(event for _, event in result.events))
 
-    def test_gateway_is_restarted_if_a_step_raises(self):
+    def test_failed_precheck_never_stops_the_gateway(self):
         deps, log = make_deps()
         deps.alert_state = lambda: (_ for _ in ()).throw(RuntimeError("grafana unreachable"))
         with self.assertRaises(RuntimeError):
             drill.run_drill(deps)
+        self.assertEqual(log, [])
+
+    def test_aborts_without_stopping_when_the_alert_is_already_firing(self):
+        deps, log = make_deps()
+        deps.alert_state = lambda: "firing"
+        result = drill.run_drill(deps)
+        self.assertFalse(result.success)
+        self.assertEqual(log, [])
+        self.assertIn("aborted", " | ".join(event for _, event in result.events))
+
+    def test_check_errors_during_waits_are_retried_not_fatal(self):
+        deps, log = make_deps()
+        real, calls = deps.alert_state, {"n": 0}
+
+        def flaky():
+            calls["n"] += 1
+            if calls["n"] == 2:  # first call after the precheck
+                raise OSError("grafana restarting")
+            return real()
+
+        deps.alert_state = flaky
+        result = drill.run_drill(deps)
+        self.assertTrue(result.success)
+        self.assertIn("check error", " | ".join(event for _, event in result.events))
+
+    def test_interrupt_while_waiting_still_restarts_the_gateway(self):
+        deps, log = make_deps()
+        real, calls = deps.alert_state, {"n": 0}
+
+        def interrupted():
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise KeyboardInterrupt
+            return real()
+
+        deps.alert_state = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            drill.run_drill(deps)
         self.assertEqual(log, ["stop", "start"])
+
+    def test_failed_stop_still_runs_start(self):
+        deps, log = make_deps()
+
+        def broken_stop():
+            log.append("stop")
+            raise subprocess.CalledProcessError(1, "docker")
+
+        deps.stop_gateway = broken_stop
+        with self.assertRaises(subprocess.CalledProcessError):
+            drill.run_drill(deps)
+        self.assertEqual(log, ["stop", "start"])
+
+    def test_eof_at_the_receipt_prompt_counts_as_unconfirmed(self):
+        deps, log = make_deps()
+        deps.ask_receiver = lambda: (_ for _ in ()).throw(EOFError())
+        result = drill.run_drill(deps)
+        self.assertFalse(result.success)
+        self.assertIn("NOT confirmed", " | ".join(event for _, event in result.events))
+
+
+class SignalAndCommandTests(unittest.TestCase):
+    def test_sigterm_and_sighup_become_exceptions_so_cleanup_runs(self):
+        saved = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP)}
+        self.addCleanup(lambda: [signal.signal(sig, handler) for sig, handler in saved.items()])
+        drill.install_signal_handlers()
+        for sig in saved:
+            with self.subTest(signal=sig.name):
+                with self.assertRaises(SystemExit):
+                    signal.raise_signal(sig)
+
+    def test_gateway_is_restarted_with_start_not_up(self):
+        self.assertEqual(drill.gateway_command("proj", "stop"), ["docker", "compose", "--project-name", "proj", "stop", "gateway"])
+        self.assertEqual(drill.gateway_command("proj", "start"), ["docker", "compose", "--project-name", "proj", "start", "gateway"])
+        with self.assertRaises(ValueError):
+            drill.gateway_command("proj", "up")
 
 
 class MainSafetyTests(unittest.TestCase):
