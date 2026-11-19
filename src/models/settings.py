@@ -19,6 +19,8 @@ class ServingSettings(BaseModel):
     cache_directory: Path = CACHE_DIRECTORY
     storage_path: Path = DEFAULT_STORAGE_PATH
     provenance_directory: Path | None = None
+    licensing_penalty: float = Field(default=0, ge=0, allow_inf_nan=False)
+    licensing_fees_path: Path = Path("/app/data/movies.csv.gz")
     request_log_queue_size: int = Field(default=1024, gt=0)
     storage_busy_timeout: float = Field(default=1.0, gt=0, allow_inf_nan=False)
     storage_max_bytes: int = Field(default=16 * 1024**3, gt=0)

@@ -2,6 +2,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -70,6 +71,41 @@ class RecommenderTests(unittest.TestCase):
                     self.assertEqual(loaded.has_positive_history(5), threshold == 6)
                     np.testing.assert_array_equal(loaded.user_profiles, model.user_profiles)
                     pd.testing.assert_frame_equal(loaded.recommend(1), model.recommend(1))
+
+    def test_fee_penalty_precedes_selection_without_changing_weights_or_eligibility(self):
+        model = EaseRecommender()
+        model.fit(self.interactions, self.movies)
+        weights = model.weights.copy()
+        scores = np.array([10, 9, 8, 0.12, 0.10, 100.0])
+        with tempfile.TemporaryDirectory() as directory:
+            fees = Path(directory) / "fees.csv"
+            fees.write_text("movie_id,license_cost\na,0\nb,0\nc,0\nd,1\ne,0.1\nf,0\n")
+            model.configure_licensing_penalty(fees, 0.1)
+            with patch.object(model, "get_scores", return_value=scores):
+                result = model.recommend(1, 1)
+        self.assertEqual(result["movie_id"].tolist(), ["e"])
+        self.assertAlmostEqual(result.iloc[0]["score"], 0.09)
+        np.testing.assert_array_equal(model.weights, weights)
+        np.testing.assert_array_equal(scores, [10, 9, 8, 0.12, 0.10, 100.0])
+
+    def test_unknown_fees_are_conservative_not_free_and_fallbacks_are_unchanged(self):
+        model = EaseRecommender()
+        model.fit(self.interactions, self.movies)
+        fallback = model.recommend(999, 20)
+        profile_fallback = model.recommend_from_profile([], [], 20)
+        with tempfile.TemporaryDirectory() as directory:
+            fees = Path(directory) / "fees.csv"
+            fees.write_text("movie_id,license_cost\na,0.5\nb,\nc,-1\nd,NaN\ne,0\n")
+            model.configure_licensing_penalty(fees, 0.1)
+            self.assertEqual(model.licensing_policy["unknown_model_movies"], 4)
+            np.testing.assert_allclose(model.licensing_penalties, [0.05, 0.05, 0.05, 0.05, 0, 0.05])
+            fees.write_text("movie_id,license_cost\na,\n")
+            with self.assertRaisesRegex(ValueError, "validated fees"):
+                model.configure_licensing_penalty(fees, 0.1)
+        pd.testing.assert_frame_equal(model.recommend(999, 20), fallback)
+        pd.testing.assert_frame_equal(model.recommend_from_profile([], [], 20), profile_fallback)
+        result = model.recommend_from_profile(["a"], ["a", "b", "c"], 1)
+        self.assertEqual(result["movie_id"].tolist(), ["e"])
 
 
 if __name__ == "__main__":

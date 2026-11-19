@@ -23,6 +23,13 @@ class MetadataBatch:
     error_type: str | None = None
 
 
+def split_rejected_batch(batch: MetadataBatch, entity_ids):
+    if batch.http_status in (400, 404, 414) and len(entity_ids) > 1:
+        middle = len(entity_ids) // 2
+        return entity_ids[:middle], entity_ids[middle:]
+    return None
+
+
 @dataclass
 class MetadataCollection:
     snapshots: dict = field(default_factory=dict)

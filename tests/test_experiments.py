@@ -15,7 +15,7 @@ from api.gateway import create_gateway
 from deployment import stage_candidate, switch_traffic
 from events.parser import parse_event
 from experiment import export_experiment, finish_experiment, start_experiment
-from experiments.analysis import analyze, analyze_snapshot, markdown_report, welch
+from experiments.analysis import analyze, analyze_snapshot, html_report, markdown_report, welch
 from experiments.capture import OutcomeCapture
 from experiments.config import arm_for_slot, experiment_routing
 from routing import read_routing, selected_slot, write_json
@@ -105,6 +105,9 @@ def test_missing_and_invalid_fees_are_unknown_and_no_rating_is_not_zero(plan):
     assert (arm["missing_catalog_units"], arm["missing_fee_units"], arm["invalid_fee_units"]) == (1, 1, 1)
     assert result["comparisons"]["spend_per_assigned_user_usd"]["status"] == "unknown_missing_fees"
     assert "unknown" in markdown_report(result)
+    page = html_report(result)
+    assert "Full spending per assigned user" in page and "Mean rating per rater" in page
+    assert "unknown_missing_fees" in page and "95% CI" in page
 
 
 def test_failed_requests_and_fallback_stay_in_original_assignment(plan):
@@ -287,8 +290,30 @@ def test_registration_capture_export_and_reanalysis_with_checksum_validation(tmp
             connection.close()
         result = export_experiment(models, capture_dir, plan["id"], output, clock=START+timedelta(hours=3))
         assert result["results"] == analyze_snapshot(output)
+        assert (output / "results.html").read_text() == html_report(result["results"])
         assert result["results"]["arms"]["control"]["mean_user_rating"] == 8
         assert not finish_experiment(models, clock=START+timedelta(hours=3))["aborted"]
         (output / "fees.csv").write_text("movie_id,license_cost\nmovie,0\n")
         with pytest.raises(ValueError, match="checksum"):
             analyze_snapshot(output)
+
+
+def test_registration_rejects_changed_preflight_versions_before_writing_routing(tmp_path):
+    models, capture = tmp_path / "models", tmp_path / "capture"
+    routing = route(models)
+    capture.mkdir()
+    clock = START - timedelta(minutes=3)
+    write_json(capture / "capture-status.json", {"updated_at": clock.isoformat()})
+    before = read_routing(routing)
+    def health(url):
+        if url.endswith("/health/model"):
+            return {"versions": {"model": "same-artifact", "serving": "changed-after-preflight"}}
+        return {"healthy": True}
+    with patch("experiment.get_json", side_effect=health):
+        with pytest.raises(ValueError, match="preflight"):
+            start_experiment(models, capture, tmp_path / "unused", experiment_id="license",
+                start=START, enrollment_hours=7, follow_up_hours=1, control_slot="blue",
+                control_description="EASE", treatment_description="Cost-aware EASE",
+                fees_path=tmp_path / "unused.csv", fee_column="license_cost", clock=clock,
+                expected_versions={"blue": "control", "green": "treatment"})
+    assert read_routing(routing) == before

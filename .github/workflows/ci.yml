@@ -89,4 +89,6 @@ jobs:
         run: docker build --tag recommendation-service:ci .
 
       - name: Validate the deployment configuration
-        run: docker compose --profile '*' -f compose.yaml config --quiet --no-interpolate
+        run: |
+          docker compose --profile '*' -f compose.yaml config --quiet --no-interpolate
+          LICENSE_EXPERIMENT_ID=ci docker compose --profile '*' -f compose.yaml -f compose.license-experiment.yaml config --quiet
