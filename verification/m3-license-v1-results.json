@@ -1,0 +1,268 @@
+{
+  "experiment_id": "license-v1",
+  "arms": {
+    "control": {
+      "assigned_users": 67859,
+      "users_with_watches": 67859,
+      "observed_units": 69893,
+      "covered_units": 61115,
+      "fee_coverage": 0.8744080236933599,
+      "users_with_complete_fees": 59251,
+      "known_spend_usd": 16468.971864068,
+      "total_spend_usd": null,
+      "mean_spend_per_assigned_user_usd": null,
+      "mean_known_spend_per_assigned_user_usd": 0.24269399584532633,
+      "mean_fee_per_observed_unit_usd": null,
+      "mean_known_fee_per_covered_unit_usd": 0.26947511844993866,
+      "missing_catalog_units": 5723,
+      "missing_fee_units": 3055,
+      "invalid_fee_units": 0,
+      "rating_users": 1599,
+      "rated_units": 1604,
+      "rating_user_coverage": 0.02356356562873016,
+      "rating_unit_coverage": 0.02294936545862962,
+      "mean_user_rating": 7.00750469043152,
+      "mean_submitted_rating": 7.007481296758105
+    },
+    "treatment": {
+      "assigned_users": 67759,
+      "users_with_watches": 67759,
+      "observed_units": 69796,
+      "covered_units": 60950,
+      "fee_coverage": 0.8732592125623245,
+      "users_with_complete_fees": 59095,
+      "known_spend_usd": 16211.6743495061,
+      "total_spend_usd": null,
+      "mean_spend_per_assigned_user_usd": null,
+      "mean_known_spend_per_assigned_user_usd": 0.23925492332392892,
+      "mean_fee_per_observed_unit_usd": null,
+      "mean_known_fee_per_covered_unit_usd": 0.265983172264251,
+      "missing_catalog_units": 5739,
+      "missing_fee_units": 3107,
+      "invalid_fee_units": 0,
+      "rating_users": 1687,
+      "rated_units": 1689,
+      "rating_user_coverage": 0.024897061644947534,
+      "rating_unit_coverage": 0.024199094503983037,
+      "mean_user_rating": 7.08891523414345,
+      "mean_submitted_rating": 7.087033747779751
+    }
+  },
+  "comparisons": {
+    "spend_per_assigned_user_usd": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 0,
+      "treatment_users": 0,
+      "difference": null,
+      "ci95": null,
+      "p_value": null,
+      "status": "unknown_missing_fees"
+    },
+    "spend_per_user_with_complete_fees_usd": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 59251,
+      "treatment_users": 59095,
+      "difference": -0.0033704146728993356,
+      "ci95": [
+        -0.005239025194543614,
+        -0.0015018041512550571
+      ],
+      "p_value": 0.0004075832933083318,
+      "status": "estimated"
+    },
+    "mean_rating_per_rater": {
+      "method": "two-sided Welch t-test; independent users; treatment minus control",
+      "control_users": 1599,
+      "treatment_users": 1687,
+      "difference": 0.08141054371192968,
+      "ci95": [
+        -0.02304912893345136,
+        0.1858702163573107
+      ],
+      "p_value": 0.1265939783393581,
+      "status": "estimated"
+    },
+    "mean_fee_per_observed_unit_usd": {
+      "difference": null,
+      "method": "descriptive pooled viewing-unit mean; no independent-view test"
+    }
+  },
+  "telemetry": {
+    "fallback_requests": 19,
+    "requests": 186196
+  },
+  "has_users_in_both_arms": true,
+  "assignment_balance_p_value": 0.7880611982437358,
+  "interpretation": "Assignment-based comparison, including failed requests, fallback responses and users with no watches. Ratings describe raters only; missing fees and ratings are unknown. Complete-fee users are a conditional secondary comparison. Tests assume independent users; 95% intervals are approximate and per metric, not joint. No sequential stopping on significance.",
+  "plan": {
+    "id": "license-v1",
+    "registered_at": "2026-11-19T10:04:53.968509+00:00",
+    "start": "2026-11-19T10:07:53.968509+00:00",
+    "enrollment_end": "2026-11-19T17:07:53.968509+00:00",
+    "follow_up_seconds": 3600,
+    "observation_end": "2026-11-19T18:07:53.968509+00:00",
+    "control_slot": "blue",
+    "treatment_percent": 50,
+    "salt": "be1cb4922432491099e1246c81cf5a4f",
+    "versions": {
+      "blue": "sha256:2c84c2980f415d5d7bb08ee933bae8ae3554e572adae22966438217bae7e3aab",
+      "green": "sha256:038e922ca8f7f50aeafdf3e9adf70dd56f20232c3853272b2d56636a5fcf7ea1"
+    },
+    "version_kind": "serving",
+    "control_description": "Current EASE, no licensing penalty",
+    "treatment_description": "Same EASE weights; eligible personalized score minus 0.01 * fee_USD before top 20; unknown fee uses maximum validated snapshot fee for ranking only; unchanged cold-start/popularity policies",
+    "source_id": "cmu-movielog",
+    "topic": "movielog2",
+    "partitions": [
+      0,
+      1
+    ],
+    "fees_source": "/app/models/license-policies/license-v1/fees.csv",
+    "fees_file": "fees.csv",
+    "fee_column": "license_cost",
+    "fees_sha256": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+    "invalid_fee_movies": 0,
+    "code_revision": "bbc53db7dfe70cbde2515a2170a01947311a9f6a",
+    "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
+    "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
+    "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up",
+    "ranking_policy_reference": {
+      "id": "license-v1",
+      "prepared_at": "2026-11-19T08:13:09.957473+00:00",
+      "model_sha256": "f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+      "fees_sha256": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+      "penalty_per_usd": 0.01,
+      "fee_reference": {
+        "catalog_source": "/app/data/movies.csv.gz",
+        "catalog_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+        "metadata_url": "http://128.2.24.239:8080",
+        "tail_rows_per_partition": 100000,
+        "partitions": [
+          0,
+          1
+        ],
+        "resolved_additional_fees": 6149,
+        "movies": 15767,
+        "unknown_fees": 7049,
+        "invalid_original_fees": 0,
+        "metadata_requests": 256,
+        "max_metadata_requests": 256,
+        "rejected_movie_requests": {
+          "400": 1
+        },
+        "deferred_movies": 7048,
+        "limitation": "Recent movie coverage does not guarantee coverage of future watches; unknowns remain unknown."
+      },
+      "enrollment_hours": 7,
+      "follow_up_hours": 1,
+      "control_slot": "blue",
+      "control_description": "Current EASE, no licensing penalty",
+      "treatment_description": "Same EASE weights; eligible personalized score minus 0.01 * fee_USD before top 20; unknown fee uses maximum validated snapshot fee for ranking only; unchanged cold-start/popularity policies"
+    }
+  },
+  "capture": {
+    "partitions": {
+      "0": {
+        "partition": 0,
+        "first_time": "2026-11-19T10:04:53.600000+00:00",
+        "latest_time": "2026-11-19T19:37:55+00:00",
+        "last_offset": 1625197422,
+        "last_ingested_at": "2026-11-19T19:37:55.416007+00:00",
+        "invalid_outcomes": 5232
+      },
+      "1": {
+        "partition": 1,
+        "first_time": "2026-11-19T10:04:53.571000+00:00",
+        "latest_time": "2026-11-19T19:37:55+00:00",
+        "last_offset": 1625197566,
+        "last_ingested_at": "2026-11-19T19:37:55.411156+00:00",
+        "invalid_outcomes": 5271
+      }
+    },
+    "gateway_logging": {
+      "accepted": 186196,
+      "written": 186196,
+      "duplicates": 0,
+      "failed": 0,
+      "rejected": 0,
+      "queued": 0,
+      "healthy": true,
+      "last_error": null,
+      "last_write_at": "2026-11-19T18:07:53.085906+00:00",
+      "started_at": "2026-11-17T20:00:29.683568+00:00",
+      "experiment": {
+        "id": "license-v1",
+        "registered_at": "2026-11-19T10:04:53.968509+00:00",
+        "start": "2026-11-19T10:07:53.968509+00:00",
+        "enrollment_end": "2026-11-19T17:07:53.968509+00:00",
+        "follow_up_seconds": 3600,
+        "observation_end": "2026-11-19T18:07:53.968509+00:00",
+        "control_slot": "blue",
+        "treatment_percent": 50,
+        "salt": "be1cb4922432491099e1246c81cf5a4f",
+        "versions": {
+          "blue": "sha256:2c84c2980f415d5d7bb08ee933bae8ae3554e572adae22966438217bae7e3aab",
+          "green": "sha256:038e922ca8f7f50aeafdf3e9adf70dd56f20232c3853272b2d56636a5fcf7ea1"
+        },
+        "version_kind": "serving",
+        "control_description": "Current EASE, no licensing penalty",
+        "treatment_description": "Same EASE weights; eligible personalized score minus 0.01 * fee_USD before top 20; unknown fee uses maximum validated snapshot fee for ranking only; unchanged cold-start/popularity policies",
+        "source_id": "cmu-movielog",
+        "topic": "movielog2",
+        "partitions": [
+          0,
+          1
+        ],
+        "fees_source": "/app/models/license-policies/license-v1/fees.csv",
+        "fees_file": "fees.csv",
+        "fee_column": "license_cost",
+        "fees_sha256": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+        "invalid_fee_movies": 0,
+        "code_revision": "bbc53db7dfe70cbde2515a2170a01947311a9f6a",
+        "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
+        "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
+        "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up",
+        "ranking_policy_reference": {
+          "id": "license-v1",
+          "prepared_at": "2026-11-19T08:13:09.957473+00:00",
+          "model_sha256": "f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+          "fees_sha256": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+          "penalty_per_usd": 0.01,
+          "fee_reference": {
+            "catalog_source": "/app/data/movies.csv.gz",
+            "catalog_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+            "metadata_url": "http://128.2.24.239:8080",
+            "tail_rows_per_partition": 100000,
+            "partitions": [
+              0,
+              1
+            ],
+            "resolved_additional_fees": 6149,
+            "movies": 15767,
+            "unknown_fees": 7049,
+            "invalid_original_fees": 0,
+            "metadata_requests": 256,
+            "max_metadata_requests": 256,
+            "rejected_movie_requests": {
+              "400": 1
+            },
+            "deferred_movies": 7048,
+            "limitation": "Recent movie coverage does not guarantee coverage of future watches; unknowns remain unknown."
+          },
+          "enrollment_hours": 7,
+          "follow_up_hours": 1,
+          "control_slot": "blue",
+          "control_description": "Current EASE, no licensing penalty",
+          "treatment_description": "Same EASE weights; eligible personalized score minus 0.01 * fee_USD before top 20; unknown fee uses maximum validated snapshot fee for ranking only; unchanged cold-start/popularity policies"
+        }
+      }
+    },
+    "note": "Partition bounds establish captured time coverage, not proof that every source event was valid or every client received a response."
+  },
+  "input_files": {
+    "plan.json": "e23324d33a38dc84b351b5c15fe141e7bcc60e96d781de6f26e1346bd1f8ea83",
+    "fees.csv": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+    "requests.jsonl.gz": "97c3ef5e7b5a1a31dee630523bd6d4f0f17a235b2b24a6c85730695d3899436e",
+    "outcomes.jsonl.gz": "a80e8757985c66f8fcc0a5a1269955c426ab336d93abbd77f93b62c505266e41"
+  }
+}

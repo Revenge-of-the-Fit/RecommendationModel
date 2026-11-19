@@ -11,15 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from evaluate_online import sha256
 from events.parser import parse_event
 from experiments.config import active_plan
-from license_experiment import freeze_fees, prepare, stage_slot, start
+from license_experiment import freeze_fees, prepare, specification, stage_slot, start
 from routing import read_routing, write_json
 from services.metadata import MetadataBatch
 from storage.database import open_database
 from storage.events import EventStore, KafkaEnvelope
 
 
-@pytest.fixture
-def prepared(tmp_path):
+@pytest.fixture(params=[0.01, 0.06])
+def prepared(tmp_path, request):
     models = tmp_path / "models"
     for slot in ("blue", "green"):
         root = models / "slots" / slot
@@ -31,7 +31,8 @@ def prepared(tmp_path):
     fees.write_text("movie_id,license_cost\ncheap,0.10\nexpensive,0.80\nunknown,\ninvalid,-1\n")
     digest = sha256(models / "slots/blue/recommender.npz")
     with patch("license_experiment.get_json", return_value={"versions": {"model": "sha256:" + digest}}):
-        spec = prepare(models, "license-test", fees, tmp_path / "unused", "http://metadata", refresh=False)
+        spec = prepare(models, "license-test", fees, tmp_path / "unused", "http://metadata",
+                       refresh=False, penalty=request.param, rating_decline_margin=0.5)
     return models, spec
 
 
@@ -57,7 +58,7 @@ def test_start_fixes_eight_hours_same_model_and_policy_reference(prepared, tmp_p
     health = {
         "blue": {"versions": {"model": "sha256:" + spec["model_sha256"], "serving": "control", "dataset": "catalog"}, "ranking": control},
         "green": {"versions": {"model": "sha256:" + spec["model_sha256"], "serving": "treatment", "dataset": "catalog"},
-                  "ranking": {**control, "licensing": {"penalty_per_usd": 0.01, "fees_sha256": spec["fees_sha256"]}}},
+                  "ranking": {**control, "licensing": {"penalty_per_usd": spec["penalty_per_usd"], "fees_sha256": spec["fees_sha256"]}}},
     }
     def get_health(url):
         return health["green" if "api-green" in url else "blue"]
@@ -71,6 +72,8 @@ def test_start_fixes_eight_hours_same_model_and_policy_reference(prepared, tmp_p
         assert args["enrollment_hours"] == 7 and args["follow_up_hours"] == 1
         assert args["expected_versions"] == {"blue": "control", "green": "treatment"}
         assert args["policy_reference"] == spec
+        assert spec["decision_rule"]["maximum_rating_decline_points"] == 0.5
+        assert f"minus {spec['penalty_per_usd']:g} * fee_USD" in spec["treatment_description"]
         health["green"]["versions"]["model"] = "different"
         with pytest.raises(ValueError, match="same frozen"):
             start(models, tmp_path / "capture", tmp_path / "events", spec["id"], clock=clock)
@@ -104,7 +107,7 @@ def test_real_registration_saves_policy_and_split_ends_at_eight_hour_boundary(pr
         slot = "green" if "api-green" in url else "blue"
         ranking = {"policy": "EASE", "top_k": 20}
         if slot == "green":
-            ranking["licensing"] = {"penalty_per_usd": 0.01, "fees_sha256": spec["fees_sha256"]}
+            ranking["licensing"] = {"penalty_per_usd": spec["penalty_per_usd"], "fees_sha256": spec["fees_sha256"]}
         return {"versions": {"model": "sha256:" + spec["model_sha256"],
                              "serving": slot, "dataset": "catalog"}, "ranking": ranking}
     with patch("license_experiment.get_json", side_effect=health), patch("experiment.get_json", side_effect=health):
@@ -127,6 +130,35 @@ def test_changed_frozen_fees_cannot_be_started(prepared, tmp_path):
     with patch("license_experiment.get_json", side_effect=AssertionError("must fail before network")):
         with pytest.raises(ValueError, match="assets changed"):
             start(models, tmp_path / "capture", tmp_path / "events", spec["id"])
+
+
+def test_frozen_policy_setting_cannot_be_changed_after_preparation(prepared):
+    models, spec = prepared
+    path = models / "license-policies" / spec["id"] / "specification.json"
+    write_json(path, {**spec, "penalty_per_usd": 0.1})
+    with pytest.raises(ValueError, match="specification changed"):
+        specification(models, spec["id"])
+
+
+def test_original_unsealed_specification_remains_compatible(prepared):
+    models, spec = prepared
+    (models / "license-policies" / spec["id"] / "specification.sha256").unlink()
+    if spec["penalty_per_usd"] == 0.01:
+        assert specification(models, spec["id"])[1] == spec
+    else:
+        with pytest.raises(ValueError, match="Legacy"):
+            specification(models, spec["id"])
+
+
+@pytest.mark.parametrize("setting,value", [
+    ("penalty", 0), ("penalty", -0.01), ("penalty", float("nan")), ("penalty", float("inf")),
+    ("rating_decline_margin", -0.5), ("rating_decline_margin", 10),
+    ("rating_decline_margin", float("nan")),
+])
+def test_invalid_fixed_settings_fail_before_preparation(tmp_path, setting, value):
+    with pytest.raises(ValueError):
+        prepare(tmp_path, "invalid", tmp_path / "missing", tmp_path / "missing-db",
+                "http://metadata", **{setting: value})
 
 
 @pytest.fixture

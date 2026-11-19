@@ -30,12 +30,19 @@ penalty only; they remain unknown for spending analysis. This coefficient trades
 0.003 EASE score units for a $0.30 fee difference and does not guarantee unchanged
 ratings.
 
-In a [read-only replay of 500 training profiles](verification/m3-license-policy-replay-2026-11-19.json),
-mean recommended-slate fees fell from $0.327431 to $0.290691 (11.2%); top-20
-overlap was 87.86% and mean original EASE score retention was 99.52%. These are
-ranking diagnostics, not watched-movie savings or observed ratings. The live
-experiment has not run, so cost/rating effects, statistical confidence and the
-results screenshot are not yet available.
+The [eight-hour November 19 production run](verification/m3-license-v1-results.json)
+enrolled 67,859 control and 67,759 treatment users, with 69,893 and 69,796 distinct
+watched user/movie units. Mean known watched fees were $0.269475 and $0.265983
+(1.30% lower); fee coverage was 87.44% and 87.33%, so full spending and its effect
+remain unknown. Spending among users with complete observed fees changed by
+-$0.003370 per user (95% CI -$0.005239 to -$0.001502), a conditional comparison.
+Among 1,599 and 1,687 raters, mean ratings were 7.0075 and 7.0889: difference
++0.0814 (95% CI -0.0230 to +0.1859; p=0.1266), not a conclusive rating change.
+These results do not demonstrate the 11.2% slate-fee reduction from replay as
+actual spending savings. The exported HTML contains both outcome tables;
+the submission screenshot remains to be captured. A stronger, separately fixed
+follow-up policy is described in the [experiment protocol](M3_EXPERIMENTS.md#stronger-follow-up-policy)
+and has not been deployed or run.
 
 ## Monitoring
 

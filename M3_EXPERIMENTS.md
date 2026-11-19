@@ -3,7 +3,8 @@
 ## Design
 
 Both arms load the same frozen EASE weights and serving catalog. Control uses the
-existing ranking. Treatment changes only personalized candidate ranking:
+existing ranking. Treatment changes only personalized candidate ranking. The
+original `license-v1` run and default preparation use coefficient 0.01:
 
 ```text
 adjusted_score = EASE_score - 0.01 * licensing_fee_USD
@@ -24,6 +25,66 @@ A [500-profile replay](verification/m3-license-policy-replay-2026-11-19.json)
 reduced mean recommended-slate fees from $0.327431 to $0.290691 (11.2%), retaining
 87.86% of top-20 items and 99.52% of mean original EASE score. This is a
 training-profile diagnostic, not measured watched-movie savings or rating quality.
+
+## Stronger follow-up policy
+
+The completed [v1 results](verification/m3-license-v1-results.json) found a 1.30%
+reduction in **known-fee watched units**, not the 11.2% recommended-slate replay
+reduction. Full spending remained unknown because roughly 12.6% of watched units
+had no validated fee. Mean ratings among raters changed by +0.0814 points
+(95% CI -0.0230 to +0.1859).
+
+A fixed [2,000-user-per-arm diagnostic](verification/m3-license-v2-diagnostics.json)
+found actual first-request treatment slates
+6.30% cheaper and first-ranked movies 3.56% cheaper. Only 58.61% of control and
+56.52% of treatment watched units occurred in that first slate. These are
+exploratory attribution diagnostics, not a replacement outcome definition or proof
+that a larger penalty achieves proportional savings.
+
+The proposed **new** `license-v2` policy uses coefficient **0.06**, retaining the
+same weights, candidate eligibility and fallback behavior. A 500-training-profile
+comparison gave:
+
+| Penalty per USD | Recommended-slate fee reduction | Original EASE score retained |
+| ---: | ---: | ---: |
+| 0.01 | 11.22% | 99.52% |
+| 0.02 | 19.03% | 97.73% |
+| 0.04 | 35.27% | 90.30% |
+| 0.06 | 53.11% | 76.81% |
+| 0.10 | 77.24% | 48.92% |
+
+These are not predicted ratings or watched-cost effects. Coefficient 0.06 leaves
+room for recommendation-to-watch dilution without the much larger relevance
+displacement of 0.10. A **10% minimum / 20% desired** reduction is a hypothesis,
+not a guaranteed outcome. The fixed rating-loss margin is **0.5 points**: the lower
+endpoint of the rating-difference 95% CI must exceed -0.5 to support the guardrail
+among observed raters. An interval crossing -0.5 is inconclusive, not a pass.
+Use the full per-assigned-user spending effect for the spending target, and report
+the watched-movie fee separately. Unknown fees prevent establishing the full
+spending target; do not substitute a favorable conditional estimate.
+
+The launcher now accepts `prepare --penalty` and `--rating-decline-margin`,
+freezes them and the decision criteria in the specification, and checks runtime
+settings against that saved specification. New specifications have a checksum;
+existing v1 inputs remain valid and unchanged.
+
+After exporting and finishing v1, set these values **before** running the
+deployment procedure below. They prepare a new run, refreshing the expanded v1
+fee snapshot instead of starting from the original narrow catalog:
+
+```bash
+export LICENSE_EXPERIMENT_ID=license-v2
+export LICENSING_TREATMENT_PENALTY=0.06
+export LICENSE_FEES_SOURCE=/app/models/license-policies/license-v1/fees.csv
+```
+
+Inspect the new fee-coverage diagnostics before proceeding; one bounded refresh
+does not guarantee complete future-watch coverage. The temporary unpenalized-green
+rollout step still uses `LICENSING_TREATMENT_PENALTY=0`; the final treatment
+recreation must use **0.06**, not the overlay's backward-compatible 0.01 default.
+Allow up to 30 minutes per backend for the shared profile-cache import.
+Run `start --id license-v2` only after a separately approved readiness check.
+Do not overwrite, re-label or pool v1 results with the stronger policy's results.
 
 ## Assignment and outcomes
 
@@ -78,8 +139,9 @@ revision=$(git rev-parse HEAD)
 git archive HEAD | sudo tar -x --no-same-owner -C /home/production
 cd /home/production
 export APP_REVISION="$revision"
-export LICENSE_EXPERIMENT_ID=license-v1
-unset LICENSING_TREATMENT_PENALTY
+export LICENSE_EXPERIMENT_ID="${LICENSE_EXPERIMENT_ID:-license-v1}"
+export LICENSING_TREATMENT_PENALTY="${LICENSING_TREATMENT_PENALTY:-0.01}"
+export LICENSE_FEES_SOURCE="${LICENSE_FEES_SOURCE:-/app/data/movies.csv.gz}"
 
 dc() {
   sudo env APP_REVISION="$APP_REVISION" LICENSE_EXPERIMENT_ID="$LICENSE_EXPERIMENT_ID" \
@@ -88,10 +150,11 @@ dc() {
 }
 license() { sudo env APP_REVISION="$APP_REVISION" bash scripts/license_experiment.sh "$@"; }
 switch() { sudo env APP_REVISION="$APP_REVISION" bash scripts/switch_model.sh "$@"; }
-wait_slot() { dc run --rm --no-deps -T model-update src/deployment.py wait "$1"; }
+wait_slot() { dc run --rm --no-deps -T model-update src/deployment.py wait "$1" --timeout 1800; }
 
 dc build model-update api api-green
-license prepare --id "$LICENSE_EXPERIMENT_ID"
+license prepare --id "$LICENSE_EXPERIMENT_ID" --fees "$LICENSE_FEES_SOURCE" \
+  --penalty "$LICENSING_TREATMENT_PENALTY" --rating-decline-margin 0.5
 ```
 
 [Preparation](src/license_experiment.py) archives the active EASE artifact and
@@ -139,15 +202,15 @@ curl -fsS http://127.0.0.1:8082/health/routing
 ```
 
 Confirm equal model/catalog versions, distinct serving IDs, healthy storage and
-logging, no provenance errors, blue with no penalty, and green with coefficient
-0.01 and the prepared fee checksum. Routing must remain blue/0%, with no experiment.
+logging, no provenance errors, blue with no penalty, and green with the selected
+coefficient and prepared fee checksum. Routing must remain blue/0%, with no experiment.
 At this point the treatment is ready but the experiment has not started.
 
 ## Start
 
 ```bash
 cd /home/production
-sudo env APP_REVISION="$APP_REVISION" bash scripts/license_experiment.sh start --id license-v1
+sudo env APP_REVISION="$APP_REVISION" bash scripts/license_experiment.sh start --id "$LICENSE_EXPERIMENT_ID"
 ```
 
 The launcher rechecks frozen weights, catalogs, ranking settings, fee checksum,
@@ -163,8 +226,9 @@ After `observation_end` plus at least one minute:
 ```bash
 cd /home/production
 export APP_REVISION="$(git -C /home/durbonas/RecommendationModel rev-parse HEAD)"
-sudo env APP_REVISION="$APP_REVISION" bash scripts/experiment.sh export --id license-v1
-sudo docker cp "$(sudo docker compose --project-name recommendationmodel ps -q api)":/app/models/experiments/license-v1/snapshot/results.html /tmp/license-results.html
+run_id="${LICENSE_EXPERIMENT_ID:-license-v1}"
+sudo env APP_REVISION="$APP_REVISION" bash scripts/experiment.sh export --id "$run_id"
+sudo docker cp "$(sudo docker compose --project-name recommendationmodel ps -q api)":"/app/models/experiments/$run_id/snapshot/results.html" "/tmp/$run_id-results.html"
 sudo bash scripts/experiment.sh finish
 ```
 
