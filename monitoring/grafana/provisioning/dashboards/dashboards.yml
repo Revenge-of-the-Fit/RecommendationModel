@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: m3
+    orgId: 1
+    folder: M3 Production
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards
