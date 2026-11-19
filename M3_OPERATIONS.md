@@ -64,3 +64,15 @@ sudo docker compose --project-name recommendationmodel --profile monitoring \
 ```
 
 `--no-deps` leaves the gateway, APIs and Kafka consumer untouched. Check Prometheus targets (`http://127.0.0.1:9090/targets` through an SSH tunnel, or `docker compose exec prometheus wget -qO- localhost:9090/api/v1/targets`), open Grafana on port 3000 and log in as `admin`.
+
+## Incident drill
+
+The drill deliberately stops the public gateway, waits for the **Gateway unreachable** alert, asks a teammate to confirm the Slack message arrived, restarts the gateway and checks recovery ([`scripts/incident_drill.py`](scripts/incident_drill.py), plan in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md)). Run it once, outside a model update, after announcing it in the team channel. The gateway is restarted even if the drill fails part-way.
+
+```bash
+cd /home/production
+export DRILL_GRAFANA_PASSWORD=<Grafana password>
+sudo --preserve-env=DRILL_GRAFANA_PASSWORD python3 scripts/incident_drill.py --confirm-stop-gateway
+```
+
+It writes `verification/m3-drill-<date>.md` with timestamped events: gateway stopped, alert firing, alert received by a named teammate, gateway started, readiness and recommendation checks passed, alert resolved. Add the Slack and Grafana screenshots and the `python src/monitoring.py` availability output for the same window next to it.
