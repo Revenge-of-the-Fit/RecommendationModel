@@ -1,0 +1,12 @@
+{
+  "kind": "Read-only training-profile replay; NOT held-out quality, watched costs, or live ratings",
+  "model_sha256": "f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+  "fees_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+  "seed": 42,
+  "users": 500,
+  "penalty_per_usd": 0.01,
+  "mean_top20_overlap": 0.8785999999999999,
+  "unknown_recommended_fees": [0, 0],
+  "mean_recommended_fee_usd": [0.32743051132379997, 0.29069109363447],
+  "mean_original_ease_score": [0.021780610217185175, 0.02167659943013288]
+}

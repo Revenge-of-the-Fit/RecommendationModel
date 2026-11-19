@@ -1,0 +1,9 @@
+services:
+  api:
+    environment:
+      LICENSING_PENALTY: "0"
+      LICENSING_FEES_PATH: /app/models/license-policies/${LICENSE_EXPERIMENT_ID:?Set LICENSE_EXPERIMENT_ID}/fees.csv
+  api-green:
+    environment:
+      LICENSING_PENALTY: ${LICENSING_TREATMENT_PENALTY:-0.01}
+      LICENSING_FEES_PATH: /app/models/license-policies/${LICENSE_EXPERIMENT_ID:?Set LICENSE_EXPERIMENT_ID}/fees.csv

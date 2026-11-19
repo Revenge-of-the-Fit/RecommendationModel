@@ -1,6 +1,7 @@
 """One outcome per randomized user, with explicit missing-data coverage."""
 import gzip
 import json
+from html import escape
 from collections import Counter
 from datetime import timedelta
 from decimal import Decimal
@@ -166,8 +167,10 @@ def markdown_report(result):
     def show(value):
         return "unknown" if value is None else f"{value:.6g}" if isinstance(value, float) else str(value)
     lines = [f"# Experiment: {result['experiment_id']}", "", "| Measure | Control | Treatment |", "| --- | ---: | ---: |"]
-    for key in ("assigned_users", "observed_units", "fee_coverage", "mean_spend_per_assigned_user_usd",
-                "mean_fee_per_observed_unit_usd", "rating_users", "rated_units", "rating_user_coverage", "mean_user_rating"):
+    for key in ("assigned_users", "users_with_watches", "observed_units", "covered_units",
+                "fee_coverage", "known_spend_usd", "total_spend_usd", "mean_spend_per_assigned_user_usd",
+                "mean_fee_per_observed_unit_usd", "mean_known_fee_per_covered_unit_usd",
+                "rating_users", "rated_units", "rating_user_coverage", "mean_user_rating"):
         lines.append(f"| {key} | {show(result['arms']['control'][key])} | {show(result['arms']['treatment'][key])} |")
     lines += ["", "Differences are treatment minus control.", "", "| Comparison | Difference | 95% CI | p-value | Status |", "| --- | ---: | --- | ---: | --- |"]
     for key, comparison in result["comparisons"].items():
@@ -176,3 +179,53 @@ def markdown_report(result):
         lines.append(f"| {key} | {show(comparison['difference'])} | {ci} | {show(comparison.get('p_value'))} | {comparison.get('status', 'descriptive')} |")
     lines += ["", result["interpretation"], "", "See results.json for fee/rating coverage, capture diagnostics, assignment balance and the fixed plan.", ""]
     return "\n".join(lines)
+
+
+def html_report(result):
+    """Render only aggregate, reproducible results for the required screenshot."""
+    def show(value):
+        return "unknown" if value is None else f"{value:.6g}" if isinstance(value, float) else str(value)
+
+    measures = {
+        "assigned_users": "Assigned users",
+        "users_with_watches": "Users with watches",
+        "observed_units": "Distinct user/movie viewing units",
+        "fee_coverage": "Fee coverage (fraction)",
+        "known_spend_usd": "Known spending component (USD; not full spend if fees missing)",
+        "total_spend_usd": "Full estimated arm spending (USD; viewing-unit proxy)",
+        "mean_spend_per_assigned_user_usd": "Full spending per assigned user (USD)",
+        "mean_fee_per_observed_unit_usd": "Full mean licensing fee per watched unit (USD)",
+        "mean_known_fee_per_covered_unit_usd": "Known-fee mean (USD; conditional on covered units)",
+        "rating_users": "Users with eligible ratings",
+        "rated_units": "Rated viewing units",
+        "rating_user_coverage": "Raters / assigned users",
+        "mean_user_rating": "Mean rating per rater (1-10; conditional on rating)",
+    }
+    rows = "".join(
+        "<tr><th>" + escape(label) + "</th>" + "".join(
+            "<td>" + escape(show(result["arms"][arm][key])) + "</td>" for arm in ("control", "treatment")
+        ) + "</tr>" for key, label in measures.items()
+    )
+    comparisons = ""
+    for key, item in result["comparisons"].items():
+        interval = item.get("ci95")
+        ci = "unknown" if interval is None else " to ".join(show(value) for value in interval)
+        comparisons += "<tr>" + "".join("<td>" + escape(str(value)) + "</td>" for value in (
+            key, show(item["difference"]), ci, show(item.get("p_value")), item.get("status", "descriptive"),
+        )) + "</tr>"
+    plan = result.get("plan", {})
+    return (
+        "<!doctype html><html lang='en'><meta charset='utf-8'><title>License experiment results</title>"
+        "<style>body{font:16px system-ui;margin:32px;max-width:1300px;color:#17233b}"
+        "table{border-collapse:collapse;width:100%;margin:20px 0}th,td{border:1px solid #ccd3de;"
+        "padding:9px;text-align:left}thead{background:#e8eef8}h1{font-size:26px}p{line-height:1.5}</style>"
+        "<h1>Licensing costs and observed ratings: " + escape(result["experiment_id"]) + "</h1>"
+        "<p><b>Control:</b> " + escape(plan.get("control_description", "See fixed plan")) +
+        "<br><b>Treatment:</b> " + escape(plan.get("treatment_description", "See fixed plan")) + "</p>"
+        "<table><thead><tr><th>Measure</th><th>Control</th><th>Treatment</th></tr></thead><tbody>" +
+        rows + "</tbody></table><h2>Treatment minus control</h2>"
+        "<table><thead><tr><th>Comparison</th><th>Difference</th><th>95% CI</th><th>p-value</th>"
+        "<th>Status</th></tr></thead><tbody>" + comparisons + "</tbody></table><p>" +
+        escape(result["interpretation"]) + "</p><p>Generated from the checksummed snapshot; "
+        "see results.json and plan.json for fixed times, fee reference and diagnostics.</p></html>"
+    )

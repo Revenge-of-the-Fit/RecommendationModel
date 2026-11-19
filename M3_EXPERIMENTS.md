@@ -1,201 +1,192 @@
-# Experiment tracking and analysis (issue #41)
+# Licensing-cost experiment
 
-This adds tracking and statistical analysis to the two model servers from #40.
-The cheaper ranking policy and the final licensing-cost experiment belong to
-their own tickets. An infrastructure smoke test with the existing models does
-not answer the final cost-versus-ratings question.
+## Design
 
-## Cost-aware ranking (issue #44)
+Both arms load the same frozen EASE weights and serving catalog. Control uses the
+existing ranking. Treatment changes only personalized candidate ranking:
 
-The treatment uses the **same frozen EASE artifact** as control. Set
-`LICENSING_PENALTY=0.1` and `LICENSING_FEES_PATH` to an immutable CSV/CSV.gz with
-`movie_id,license_cost` (USD). Control keeps the default zero penalty.
-[EASE ranking](src/recommender.py) subtracts `0.1 * fee_usd` from every eligible
-personalized candidate's score **before** selecting top 20. Existing seen/unpopular
-exclusions and popularity/movie-ID tie breaks remain. Popularity-only and LLM
-cold-start rankings are unchanged, so their traffic can dilute the measured effect.
+```text
+adjusted_score = EASE_score - 0.01 * licensing_fee_USD
+```
 
-This is a fixed relevance/cost tradeoff, not a retrained model: a $0.30 fee
-difference offsets 0.03 EASE score units. Strong relevance differences can still
-win; it does not simply serve the cheapest catalog entries. The coefficient is a
-pre-specified hypothesis, not a proven rating-preservation guarantee. The live
-experiment must estimate that tradeoff without tuning mid-run.
+[The ranking implementation](src/recommender.py) applies the penalty before
+selecting top 20, preserving seen/unpopular exclusions and popularity/movie-ID
+tie breaks. LLM cold-start and popularity-only recommendations are unchanged.
+EASE scores are relative relevance scores, not predicted ratings or probabilities.
 
-The shared fee validator rejects duplicate IDs and marks absent, blank, negative,
-or nonfinite fees unknown. Unknowns use the maximum validated snapshot fee **only
-as a conservative ranking penalty**, never as an observed price or free viewing.
-No known fees or an unreadable snapshot prevents treatment readiness. The fee
-source, SHA-256, rule, coefficient and unknown handling appear in `/health/model`
-and the immutable serving manifest, producing a distinct serving ID without
-changing the underlying model hash. Fees are loaded once, not fetched per request.
+Fees must have unique `movie_id` values and a `license_cost` column. Missing,
+negative and nonfinite fees are unknown. Unknowns receive the maximum validated
+snapshot fee as a conservative ranking penalty only; they remain unknown for
+spending analysis. The rule, coefficient and fee checksum are included in serving
+provenance. Fees are loaded once at startup.
 
-The [November 13 production verification](verification/m3-experiment-2026-11-13.md)
-completed enrollment, event capture, export and local re-analysis for 7,975 users.
-It includes the saved plan, aggregate results and completion record. The smoke test
-also identified incomplete movie-fee coverage to address before the final run.
+A [500-profile replay](verification/m3-license-policy-replay-2026-11-19.json)
+reduced mean recommended-slate fees from $0.327431 to $0.290691 (11.2%), retaining
+87.86% of top-20 items and 99.52% of mean original EASE score. This is a
+training-profile diagnostic, not measured watched-movie savings or rating quality.
 
-## Design and fixed protocol
+## Assignment and outcomes
 
-Before a run, [experiment.py](src/experiment.py) records an immutable plan with
-the experiment ID, randomly generated salt, control slot, both served versions,
-descriptions, enrollment times, follow-up duration, Kafka partitions, and a copied,
-hashed movie-fee file. The same plan is archived and installed atomically in the
-routing configuration. A new experiment needs a new ID.
+- [The gateway](src/api/gateway.py) hashes a saved salt and normalized user ID for
+  stable 50/50 user assignment.
+- Enrollment lasts seven hours. A user's first request starts a fixed one-hour
+  follow-up; repeated requests do not reset it. Failed requests and fallback stay
+  in the assigned arm.
+- The split continues through the last follow-up and automatically returns to
+  blue/control at start + eight hours. Start is scheduled three minutes after
+  registration.
+- [The plan](src/experiment.py) freezes serving IDs, descriptions, assignment salt,
+  observation windows, partitions and the copied fee snapshot.
+- Gateway request logs and [pre-compaction Kafka capture](src/experiments/capture.py)
+  preserve assignments, actual served versions, watches and ratings. Capture must
+  succeed before Kafka offsets are acknowledged.
 
-The [gateway](src/api/gateway.py) uses SHA-256 of `salt:normalized_user_id` for a
-stable 50/50 control/treatment assignment. Repeated requests and leading-zero
-forms of a user ID keep the same assignment. Only control receives traffic before
-the start and after the final follow-up ends. During the run, fallback remains
-available; its actual slot/version is recorded separately from the assigned arm.
+[Analysis](src/experiments/analysis.py) uses these outcomes:
 
-Enrollment is `[start, enrollment_end)`. A user's first gateway request in that
-window starts their follow-up, even if serving fails. Outcomes are strictly after
-that request and strictly before `first_request + follow_up_seconds`. Later
-requests do not reset the clock. Both versions and the allocation stay fixed until
-`enrollment_end + follow_up_seconds`. Users arriving after enrollment closes can
-receive recommendations but do not enter the analysis cohort. This is an
-assignment-based comparison; failed requests, fallback and users with no observed
-watches remain in their assigned arm.
+| Measure | Definition |
+| --- | --- |
+| Spending per assigned user | Sum fees for distinct user/movie pairs watched strictly after first assignment and before the user's follow-up ends. Include users with no watches as zero. |
+| Mean watched-movie fee | Total fees divided by distinct watched user/movie pairs; reported descriptively. |
+| Mean rating per rater | Latest valid 1-10 rating per watched movie, submitted at/after its first qualifying watch and within follow-up; average within user, then equally across raters. |
 
-Gateway records reuse the asynchronous [request writer](src/storage/requests.py)
-in a separate `experiment_logs` volume, including experiment, user, timestamp,
-assigned arm/slot, response status, actual served slot/version, routing generation
-and backend request ID. That ID links to the existing backend request log.
-`/health/experiment` exposes write failures/rejections and the gateway start time.
-An export refuses unhealthy or undrained logging, a changed served version, or a
-gateway restart since enrollment began; an interrupted run must be repeated.
+Two-sided Welch tests report treatment-minus-control spending and rating
+differences, 95% confidence intervals and p-values, treating users as independent
+units and allowing unequal variances. Insufficient samples or zero variation
+produce no claimed confidence. Intervals are approximate and per metric.
 
-The Kafka consumer passes original parsed messages to
-[OutcomeCapture](src/experiments/capture.py) **before** `WatchBuffer` coalesces them
-or the main event store replaces watches. It saves compact watch/rating rows keyed
-by partition/offset in a separate SQLite database for the fixed observation window.
-Replay is idempotent; conflicting duplicates fail. Kafka offsets are acknowledged
-only after these observations and the normal live-store writes succeed. A capture
-failure stops ingestion so it can replay, while the recommendation service keeps
-running. Each outcome database is capped at 8 GiB and respects the configured disk
-and WAL safety limits. Retain the run until evidence is copied; maintenance of the
-main event database does not delete these observations.
+Unknown fees make full spending and its effect unknown; known spending and
+complete-fee-user comparisons are labeled conditional. Missing ratings are not
+zero, and rating results describe raters rather than every assigned user. Report
+coverage and sample sizes alongside estimates. Do not stop or extend a run based
+on significance. Spending is a viewing-unit proxy, not actual billing.
 
-## Measures and statistical interpretation
+## Deploy and prepare
 
-| Metric | Data | Operationalization |
-| --- | --- | --- |
-| Licensing spend per assigned user, USD | First assignment, watch events, frozen movie fees | One viewing unit per distinct user/movie watched in that user's follow-up, including movies outside the recommendation slate. Sum its fees and average across all assigned users, including zero for users with no observed watches. This is the M2 viewing-unit proxy, not a count of true plays. |
-| Mean fee per observed viewing unit, USD | Same watch/fee join | Divide summed fees by the number of distinct user/movie units. Report its arm difference descriptively. |
-| Mean user rating, 1–10 | Submitted ratings for watched movies | Use the latest valid rating per user/movie submitted at or after its first qualifying watch and within the same follow-up. Average those ratings per user, then give each rater equal weight. Report the pooled submitted-rating mean separately. |
+Run on the production VM with sudo access. Start with blue serving all traffic, both backends healthy,
+and no registered experiment. Coordinate with other operators and pause scheduled
+model updates during rollout. Preserve the existing `.env`, Kafka configuration,
+project name and volumes. Do not recreate gateway/Kafka or reset offsets.
 
-The fee file must have unique `movie_id` values and the named fee column. Missing,
-negative or non-finite fees are unknown, never free. Results report missing catalog,
-missing fee and invalid fee counts, fee coverage, and the known spending component.
-If any observed unit lacks a fee, the full-arm total and spend-per-assigned-user
-effect are unknown. A secondary comparison of users with complete fees is labeled
-conditional; it is not an estimate for every assigned user. Rating coverage is
-reported both per assigned user and per viewing unit; non-raters are not assigned
-zero ratings. Ratings describe users who chose to rate, so changes in who rates
-limit claims about satisfaction for all users.
-
-[Analysis](src/experiments/analysis.py) reports treatment minus control with
-two-sided Welch tests and 95% confidence intervals on **per-user** spending and
-**per-user** mean ratings. See [SciPy's test and interval definition](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.ttest_ind.html).
-Users are the randomization and independent analysis units; repeated requests,
-minutes and ratings are not independent samples. Welch allows unequal arm
-variances. Its intervals are approximate, relying on independent users and adequate
-sample sizes; small samples and strongly skewed spending require cautious
-interpretation. Insufficient samples or no observed variation produce no claimed
-confidence. The intervals are per metric, not simultaneous guarantees. A binomial
-assignment-balance check is diagnostic. Set duration before starting and do not
-stop when a p-value becomes significant; a non-significant result is inconclusive.
-
-## Deployment and operation
-
-Deploy the reviewed source before a run. Build `gateway`, `kafka` and
-`model-update`, then recreate only gateway and Kafka. The two API containers and
-their models do not need replacement for this ticket. Recreating the gateway has
-a brief serving gap; do this before the final grading window. Let Kafka catch up
-and confirm `/health/experiment` is healthy before registering a run. Use the
-existing Compose project name, `.env`, Kafka group and volumes. Do not reset offsets.
-
-All commands below run from `/home/production` on the VM. Replace the example
-timestamps, descriptions and fee path with the values chosen **before** the real
-experiment. Keep two distinct served version identifiers; if the ranking variants
-share weights, their served identifiers must also distinguish ranking settings.
-The ranking-policy ticket must provide those identifiers before the final run.
+Run deployment and start from the same shell so the revision and experiment ID
+remain set. Copy the committed source and build the three replacement images:
 
 ```bash
+set -euo pipefail
+sudo -v
+cd /home/durbonas/RecommendationModel
+revision=$(git rev-parse HEAD)
+git archive HEAD | sudo tar -x --no-same-owner -C /home/production
 cd /home/production
+export APP_REVISION="$revision"
+export LICENSE_EXPERIMENT_ID=license-v1
+unset LICENSING_TREATMENT_PENALTY
+
+dc() {
+  sudo env APP_REVISION="$APP_REVISION" LICENSE_EXPERIMENT_ID="$LICENSE_EXPERIMENT_ID" \
+    LICENSING_TREATMENT_PENALTY="${LICENSING_TREATMENT_PENALTY:-0.01}" \
+    docker compose --project-name recommendationmodel "$@"
+}
+license() { sudo env APP_REVISION="$APP_REVISION" bash scripts/license_experiment.sh "$@"; }
+switch() { sudo env APP_REVISION="$APP_REVISION" bash scripts/switch_model.sh "$@"; }
+wait_slot() { dc run --rm --no-deps -T model-update src/deployment.py wait "$1"; }
+
+dc build model-update api api-green
+license prepare --id "$LICENSE_EXPERIMENT_ID"
+```
+
+[Preparation](src/license_experiment.py) archives the active EASE artifact and
+training manifest. It broadens catalog prices using movie IDs from an indexed
+tail of up to 100,000 retained events per partition and rate-limited course movie
+metadata requests, then freezes the fee snapshot. Inspect the printed unknown-fee
+count; recent coverage cannot guarantee coverage of future watches. HTTP failures
+stop preparation. An existing validated snapshot can instead be supplied with
+`--fees /app/models/PATH.csv --no-refresh`.
+
+Assets are retained under `/app/models/license-policies/<id>/`. Use a new ID for
+each experiment; existing assets and saved snapshots are not overwritten.
+Preparation does not change live routing.
+
+Roll through green as unpenalized control, replace blue, then load treatment into
+inactive green. Staging refuses an active slot and preserves its prior files.
+Stop if any command fails:
+
+```bash
+license stage --id "$LICENSE_EXPERIMENT_ID" --slot green
+LICENSING_TREATMENT_PENALTY=0 dc \
+  -f compose.yaml -f compose.license-experiment.yaml up -d --no-deps --no-build api-green
+wait_slot green
+switch green
+
+license stage --id "$LICENSE_EXPERIMENT_ID" --slot blue
+dc \
+  -f compose.yaml -f compose.license-experiment.yaml up -d --no-deps --no-build api
+wait_slot blue
+switch blue
+
+dc \
+  -f compose.yaml -f compose.license-experiment.yaml up -d --no-deps --no-build api-green
+wait_slot green
+
+curl -fsS http://127.0.0.1:8083/health/model
+curl -fsS http://127.0.0.1:8084/health/model
+curl -fsS http://127.0.0.1:8083/health/storage
+curl -fsS http://127.0.0.1:8084/health/storage
 curl -fsS http://127.0.0.1:8082/health/experiment
 curl -fsS http://127.0.0.1:8082/health/routing
 ```
 
-Register with a start at least two minutes ahead. This example enrolls for 12 hours
-and follows each enrolled user for one hour; choose the actual windows before
-running, allowing time to collect ratings. `--fees` defaults to
-`/app/data/movies.csv.gz`, with column `license_cost`; a different validated fee
-snapshot can be supplied with `--fees` and `--fee-column`.
+Confirm equal model/catalog versions, distinct serving IDs, healthy storage and
+logging, no provenance errors, blue with no penalty, and green with coefficient
+0.01 and the prepared fee checksum. Routing must remain blue/0%, with no experiment.
+At this point the treatment is ready but the experiment has not started.
+
+## Start
 
 ```bash
-sudo bash scripts/experiment.sh start --id license-v1 --start 'REPLACE_WITH_ISO_TIME_AND_TIMEZONE' --enrollment-hours 12 --follow-up-hours 1 --control-slot blue --control-description 'Current EASE' --treatment-description 'REPLACE_WITH_EXACT_FIXED_RANKING_POLICY'
+cd /home/production
+sudo env APP_REVISION="$APP_REVISION" bash scripts/license_experiment.sh start --id license-v1
 ```
 
-The [wrapper](scripts/experiment.sh) shares the model-update/switch lock. Updates
-and manual traffic switches refuse a registered experiment. Probe response headers
-include `x-experiment-id` and `x-experiment-arm` during the active window. Do not use
-manual probes during the final run; use a separate smoke-test ID and window for
-those checks.
+The launcher rechecks frozen weights, catalogs, ranking settings, fee checksum,
+provenance and capture health before registration. Save the printed plan and its
+`observation_end`. Registered experiments block model updates and traffic switches.
+Do not rebuild/restart either arm, change fees, retrain, or send manual
+recommendation probes during observation. The shell can exit after registration.
 
-After the printed `observation_end` plus at least one minute, export and analyze:
+## Export and finish
+
+After `observation_end` plus at least one minute:
 
 ```bash
-sudo bash scripts/experiment.sh export --id license-v1
+cd /home/production
+export APP_REVISION="$(git -C /home/durbonas/RecommendationModel rev-parse HEAD)"
+sudo env APP_REVISION="$APP_REVISION" bash scripts/experiment.sh export --id license-v1
+sudo docker cp "$(sudo docker compose --project-name recommendationmodel ps -q api)":/app/models/experiments/license-v1/snapshot/results.html /tmp/license-results.html
+sudo bash scripts/experiment.sh finish
 ```
 
-Export requires every declared Kafka partition to span enrollment through the
-end of follow-up plus one minute of arrivals. If ingestion is behind, wait; do not
-interpret a partial stream as zero watches. Invalid parsed outcome counts are
-included as data-quality limitations. Bounds do not prove that every event was
-valid or every response reached the client. Gateway telemetry describes responses
-selected by the service, rather than course-confirmed receipt.
+Export requires healthy/drained gateway logging, unchanged serving versions, no
+gateway restart since enrollment, and Kafka partitions bracketing the complete
+window. If ingestion is behind, wait and retry. Bounds establish time coverage,
+not proof that every source event was valid or every client received a response.
 
-The default output is `/app/models/experiments/license-v1/snapshot/`, containing
-`plan.json`, the fee snapshot, `requests.jsonl.gz`, `outcomes.jsonl.gz`, an input
-checksum manifest, `results.json`, and a compact `results.md` table. The original
-observations permit an exact re-analysis after live watch compaction or updates.
-The exporter never overwrites a prior snapshot.
+The snapshot contains the plan, fees, requests, outcomes, checksums and aggregate
+`results.json`, `results.md` and `results.html`. Open the HTML and capture both
+licensing-cost and rating tables, including confidence intervals. Keep user-level
+observations and course data private. Report coverage, sample sizes, arm means,
+differences and uncertainty; distinguish cheaper watched movies from fewer watches.
 
-Reproduce the analysis without Kafka, API credentials or the live database:
+Re-analyze the saved snapshot:
 
 ```bash
 sudo bash scripts/experiment.sh analyze --snapshot /app/models/experiments/license-v1/snapshot
 ```
 
-Or, on a machine with project requirements installed, use
-`python src/experiment.py analyze --snapshot PATH_TO_COPIED_SNAPSHOT`.
-After the successful export, remove the experiment and return all traffic to its
-control slot:
+For emergency recovery, abort explicitly:
 
 ```bash
-sudo bash scripts/experiment.sh finish
+sudo bash scripts/experiment.sh finish --abort-reason 'Describe the incident'
 ```
 
-If recovery is needed during a run, explicitly abort and record why:
-
-```bash
-sudo bash scripts/experiment.sh finish --abort-reason 'Describe the incident requiring recovery'
-```
-
-An aborted run cannot supply the final experimental result. Once analysis is
-complete, include the fixed plan, coverage, user counts, both cost and rating
-results, differences and uncertainty in the report. Keep the full snapshot on the
-VM or copy it for reproduction; share aggregate results in GitHub. The separate
-live-experiment ticket supplies the final run and its required screenshot.
-
-## Verification
-
-`tests/test_experiments.py` exercises assignment/fallback logging, fixed windows,
-repeated requests and watches, late observations, equal user weights, missing fees,
-conditional ratings, Welch interval direction, immutable plans and snapshot
-re-analysis. `tests/test_watch_consumer.py` checks that intermediate watches survive
-coalescing and that failed capture cannot acknowledge Kafka offsets. Existing
-gateway/deployment and online-evaluation tests remain in CI. All automated tests use
-local fixtures; the production verification linked above records the deployed run
-and independent re-analysis of its preserved observations.
+An aborted run is not a completed experiment result. Historical infrastructure
+verification is recorded in [the November 13 smoke test](verification/m3-experiment-2026-11-13.md).
