@@ -117,6 +117,23 @@ class ServingProvenanceTests(unittest.TestCase):
         self.assertEqual(no_description.fallback_reason, "no_description_or_positive_history")
         self.assertEqual(unknown_user.fallback_reason, "user_not_in_dataset")
 
+    def test_cost_policy_uses_same_artifact_and_publishes_frozen_ranking(self):
+        control = RecommendationService.load(self.settings)
+        fees = self.directory / "fees.csv"
+        fees.write_text("movie_id,license_cost\na,0.1\nb,0.3\nc,0.2\nd,\n")
+        treatment = RecommendationService.load(self.settings.model_copy(update={
+            "licensing_penalty": 0.1, "licensing_fees_path": fees,
+        }))
+        self.assertEqual(control.versions["model"], treatment.versions["model"])
+        self.assertNotEqual(control.ranking_configuration(), treatment.ranking_configuration())
+        rule = treatment.ranking_configuration()["licensing"]
+        self.assertEqual(rule["penalty_per_usd"], 0.1)
+        self.assertEqual(rule["fees_sha256"], file_version(fees).removeprefix("sha256:"))
+        with TestClient(create_app(self.settings.model_copy(update={
+            "licensing_penalty": 0.1, "licensing_fees_path": fees,
+        }))) as client:
+            self.assertEqual(client.get("/health/model").json()["ranking"]["licensing"], rule)
+
     def test_cached_profile_details_survive_service_validation(self):
         profile = {
             "liked_genres": ["Drama"], "excluded_genres": ["Horror"],

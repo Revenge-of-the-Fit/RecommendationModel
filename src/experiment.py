@@ -12,7 +12,7 @@ from pathlib import Path
 
 from deployment import get_json
 from evaluate_online import load_licensing_fees, sha256, utc
-from experiments.analysis import analyze_snapshot, markdown_report
+from experiments.analysis import analyze_snapshot, html_report, markdown_report
 from experiments.config import experiment_routing, validate_plan
 from routing import BACKENDS, read_routing, write_json
 from storage.payloads import load_json
@@ -24,7 +24,8 @@ def readonly(path):
 
 def start_experiment(directory, capture_directory, storage_path, *, experiment_id, start,
                      enrollment_hours, follow_up_hours, control_slot, control_description,
-                     treatment_description, fees_path, fee_column, gateway_url="http://gateway:8082", clock=None):
+                     treatment_description, fees_path, fee_column, gateway_url="http://gateway:8082", clock=None,
+                     expected_versions=None, policy_reference=None):
     clock = clock or datetime.now(timezone.utc)
     if start < clock + timedelta(minutes=2):
         raise ValueError("Start at least two minutes in the future so capture begins before enrollment")
@@ -44,6 +45,8 @@ def start_experiment(directory, capture_directory, storage_path, *, experiment_i
         raise ValueError("Both slots must publish serving provenance before registering an experiment")
     version_kind = "serving" if all(item.get("serving") for item in loaded.values()) else "model"
     versions = {slot: item[version_kind] for slot, item in loaded.items()}
+    if expected_versions is not None and versions != expected_versions:
+        raise ValueError("Served versions changed after ranking-policy preflight")
     connection = readonly(storage_path)
     try:
         partitions = [row[0] for row in connection.execute(
@@ -69,6 +72,7 @@ def start_experiment(directory, capture_directory, storage_path, *, experiment_i
         "exposure": "First gateway request in enrollment window; include failed requests by assigned arm",
         "viewing_unit": "Distinct user/movie watched strictly after first assignment and before assignment + follow-up",
         "ratings": "Latest submitted 1-10 rating per watched movie after its first qualifying watch, within user follow-up",
+        **({"ranking_policy_reference": policy_reference} if policy_reference is not None else {}),
     })
     archive = directory / "experiments" / plan["id"]
     archive.mkdir(parents=True, exist_ok=False)
@@ -148,6 +152,7 @@ def export_experiment(directory, capture_directory, experiment_id, output, *, ga
         result = analyze_snapshot(stage)
         write_json(stage / "results.json", result)
         (stage / "results.md").write_text(markdown_report(result), encoding="utf-8")
+        (stage / "results.html").write_text(html_report(result), encoding="utf-8")
         os.replace(stage, output)
     return {"snapshot": str(output), "results": result}
 

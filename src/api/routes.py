@@ -35,7 +35,8 @@ def readiness(service: Service) -> dict[str, str]:
 
 @router.get("/health/model")
 def model_version(service: Service) -> dict:
-    result = {"status": "ready", "versions": service.versions}
+    result = {"status": "ready", "versions": service.versions,
+              "ranking": service.ranking_configuration()}
     if issue := getattr(service, "provenance_error", None):
         result["provenance_error"] = issue
     return result

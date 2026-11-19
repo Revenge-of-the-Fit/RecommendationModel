@@ -48,6 +48,7 @@ class ApiRequestLoggingTests(unittest.TestCase):
         self.settings = ServingSettings(storage_path=self.path)
         self.service = SimpleNamespace(
             versions={"model": "model-2", "dataset": "dataset-4"},
+            ranking_configuration=lambda: {"policy": "fixture"},
             recommend=Mock(return_value=recommendation_result()),
         )
 
