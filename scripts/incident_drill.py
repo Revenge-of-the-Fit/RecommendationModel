@@ -3,7 +3,10 @@
 
 Standard library only, so it runs on the VM host. The gateway is restarted as soon as the alert has
 fired, and also on any failure, Ctrl-C, SIGTERM or dropped SSH session. Run it once, inside tmux or
-screen, after announcing it in the team Slack channel:
+screen, after announcing it in the team Slack channel. The evidence file it writes
+(`verification/m3-drill-<date>.md`: timestamps and a first name, no user data) is the only incident
+file meant for Git; real incident timelines, postmortems and logs stay out of the repo
+(see INCIDENT_RESPONSE.md):
 
     sudo --preserve-env=DRILL_GRAFANA_PASSWORD python3 scripts/incident_drill.py --confirm-stop-gateway
 """

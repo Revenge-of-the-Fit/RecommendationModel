@@ -75,6 +75,6 @@ export DRILL_GRAFANA_PASSWORD=<Grafana password>
 sudo --preserve-env=DRILL_GRAFANA_PASSWORD python3 scripts/incident_drill.py --confirm-stop-gateway
 ```
 
-It writes `verification/m3-drill-<date>.md` with timestamped events: gateway stopped, alert firing, alert received by a named teammate, gateway started, readiness and recommendation checks passed, alert resolved. Add the Slack and Grafana screenshots and the `python src/monitoring.py` availability output for the same window next to it.
+It writes `verification/m3-drill-<date>.md` with timestamped events: gateway stopped, alert firing, alert received by a named teammate, gateway started, readiness and recommendation checks passed, alert resolved. Add the Slack and Grafana screenshots and the `python src/monitoring.py` availability output for the same window next to it. This drill record is the only incident file meant for Git; the timelines, postmortems and logs of real incidents go in a Slack canvas and on the VM, as described in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md).
 
 Grafana refuses to start without `GRAFANA_ADMIN_PASSWORD`. The password is only applied when Grafana first creates its database, so if the `grafana_data` volume was initialised earlier, set it explicitly: `sudo docker compose --project-name recommendationmodel exec grafana grafana cli admin reset-admin-password '<password>'`.
