@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  # Black-box probe of the public entry point: this is what the "gateway unreachable" alert uses.
+  - job_name: gateway-ready
+    metrics_path: /probe
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets: ["http://gateway:8082/health/ready"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Aggregate availability, quality, cost and drift gauges from src/monitoring_api.py.
+  - job_name: mlip-monitoring
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["monitoring:9091"]
