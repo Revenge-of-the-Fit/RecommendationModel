@@ -52,6 +52,9 @@ class RecommendationService:
         dataset = MovieDataset(settings.data_directory)
         if not set(model.movie_ids).issubset(set(dataset.movies["movie_id"])):
             raise ValueError("The trained model contains movies absent from the catalog")
+        if settings.licensing_penalty:
+            model.configure_licensing_penalty(settings.licensing_fees_path, settings.licensing_penalty)
+            LOGGER.info("Loaded licensing ranking policy: %s", model.licensing_policy)
         cold_start = ColdStartRecommender(
             dataset.movies, settings.cache_directory, model=model, storage_path=settings.storage_path
         )
@@ -95,6 +98,7 @@ class RecommendationService:
         return {
             "policy": "ease-with-profile-and-popularity-fallback",
             "top_k": 20,
+            **({"licensing": self.model.licensing_policy} if self.model.licensing_policy else {}),
             **self.settings.model_dump(include={
                 "live_enabled", "live_source_id", "live_topic", "cold_start_wait_seconds",
                 "recommendation_budget_seconds",

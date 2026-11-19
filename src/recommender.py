@@ -3,6 +3,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from evaluate_online import load_licensing_fees, sha256
+
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "recommender.npz"
 DEFAULT_REGULARIZATION = 100.0
@@ -34,6 +36,39 @@ class EaseRecommender:
         self.popularity = np.array([], dtype=np.float64)
         self.user_index = {}
         self.movie_index = {}
+        self.licensing_penalties = None
+        self.licensing_policy = None
+
+    def configure_licensing_penalty(self, fees_path: Path, penalty: float) -> None:
+        """Freeze validated fees once; leave weights and fallback policies unchanged."""
+        if not np.isfinite(penalty) or penalty <= 0:
+            raise ValueError("Licensing penalty must be positive and finite")
+        fees_path = Path(fees_path)
+        digest = sha256(fees_path)
+        fees, invalid = load_licensing_fees(fees_path)
+        known = [float(fee) for fee in fees.values() if fee is not None]
+        if not known or not np.isfinite(known).all():
+            raise ValueError("Licensing policy requires finite validated fees")
+        unknown_penalty_fee = max(known)
+        fee_values = np.array([
+            float(fees[movie]) if fees.get(movie) is not None else unknown_penalty_fee
+            for movie in self.movie_ids
+        ])
+        penalties = penalty * fee_values
+        if not np.isfinite(penalties).all() or sha256(fees_path) != digest:
+            raise ValueError("Fees changed during loading or produced nonfinite penalties")
+        self.licensing_penalties = penalties
+        self.licensing_policy = {
+            "rule": "ease_score - penalty_per_usd * fee_usd, before top_k",
+            "scope": "eligible personalized EASE candidates only; unchanged popularity and cold start",
+            "penalty_per_usd": penalty,
+            "fees_source": str(fees_path), "fees_sha256": digest,
+            "fee_column": "license_cost",
+            "unknown_fee_policy": "maximum validated fee for ranking only; unknown for accounting",
+            "unknown_ranking_fee_usd": unknown_penalty_fee,
+            "unknown_model_movies": sum(fees.get(movie) is None for movie in self.movie_ids),
+            "invalid_fee_movies": len(invalid),
+        }
 
     def fit(self, interactions: pd.DataFrame, movies: pd.DataFrame) -> None:
         if interactions.empty or movies.empty:
@@ -128,7 +163,10 @@ class EaseRecommender:
         scores = self.get_scores(user_id, popularity_only)
         user_row = self.user_index.get(user_id)
         seen_columns = np.flatnonzero(self.seen_movies[user_row]) if user_row is not None else []
-        return self._recommend_scores(scores, seen_columns, top_k)
+        return self._recommend_scores(
+            scores, seen_columns, top_k,
+            personalized=not popularity_only and self.has_positive_history(user_id),
+        )
 
     def recommend_from_profile(
         self,
@@ -154,13 +192,19 @@ class EaseRecommender:
             self.movie_index[movie_id] for movie_id in set(seen_movie_ids)
             if movie_id in self.movie_index
         ]
-        return self._recommend_scores(scores, seen_columns, top_k)
+        return self._recommend_scores(
+            scores, seen_columns, top_k,
+            personalized=not popularity_only and bool(positive_columns),
+        )
 
-    def _recommend_scores(self, scores, seen_columns, top_k):
+    def _recommend_scores(self, scores, seen_columns, top_k, *, personalized=False):
         eligible = self.popularity > 0
         eligible[seen_columns] = False
 
         candidates = np.flatnonzero(eligible)
+        if personalized and self.licensing_penalties is not None:
+            scores = scores.copy()
+            scores[candidates] -= self.licensing_penalties[candidates]
         order = np.lexsort(
             (
                 self.movie_ids[candidates],

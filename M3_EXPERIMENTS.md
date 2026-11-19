@@ -5,6 +5,30 @@ The cheaper ranking policy and the final licensing-cost experiment belong to
 their own tickets. An infrastructure smoke test with the existing models does
 not answer the final cost-versus-ratings question.
 
+## Cost-aware ranking (issue #44)
+
+The treatment uses the **same frozen EASE artifact** as control. Set
+`LICENSING_PENALTY=0.1` and `LICENSING_FEES_PATH` to an immutable CSV/CSV.gz with
+`movie_id,license_cost` (USD). Control keeps the default zero penalty.
+[EASE ranking](src/recommender.py) subtracts `0.1 * fee_usd` from every eligible
+personalized candidate's score **before** selecting top 20. Existing seen/unpopular
+exclusions and popularity/movie-ID tie breaks remain. Popularity-only and LLM
+cold-start rankings are unchanged, so their traffic can dilute the measured effect.
+
+This is a fixed relevance/cost tradeoff, not a retrained model: a $0.30 fee
+difference offsets 0.03 EASE score units. Strong relevance differences can still
+win; it does not simply serve the cheapest catalog entries. The coefficient is a
+pre-specified hypothesis, not a proven rating-preservation guarantee. The live
+experiment must estimate that tradeoff without tuning mid-run.
+
+The shared fee validator rejects duplicate IDs and marks absent, blank, negative,
+or nonfinite fees unknown. Unknowns use the maximum validated snapshot fee **only
+as a conservative ranking penalty**, never as an observed price or free viewing.
+No known fees or an unreadable snapshot prevents treatment readiness. The fee
+source, SHA-256, rule, coefficient and unknown handling appear in `/health/model`
+and the immutable serving manifest, producing a distinct serving ID without
+changing the underlying model hash. Fees are loaded once, not fetched per request.
+
 The [November 13 production verification](verification/m3-experiment-2026-11-13.md)
 completed enrollment, event capture, export and local re-analysis for 7,975 users.
 It includes the saved plan, aggregate results and completion record. The smoke test
