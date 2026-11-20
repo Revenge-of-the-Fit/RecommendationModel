@@ -23,17 +23,17 @@ An incident is any event that stops, degrades or exposes the service or its data
 
 - **Automated:** the Grafana alert **Gateway unreachable** posts to the team Slack channel with an `@channel` mention when the public gateway's `/health/ready` probe fails for 2 minutes (or no probe data arrives). The message names the trigger and links this plan and the dashboard.
 - **Dashboard:** Grafana `M3 Production Monitoring` (uid `m3-production`) shows availability, online HitRate@20, license and LLM cost, drift, and collector health.
-- **Manual:** anyone who notices a problem (a teammate, the mentor, management) reports it in the same Slack channel. If it meets the bar of an incident, the incident is declared at that point. Issues that don't meet the bar for declaring an incident can be added as a bug ticket in GitHub.
+- Teammates report problems in the same Slack channel. When the mentor or management reports a problem by email, the teammate who sees it posts it there. We declare an incident if it meets the criteria above. Other issues can be added as bug tickets in GitHub.
 - Known gap: We don't have external health checks to alert on if the whole VM or the monitoring containers die. In this event, alerts will not fire.
 
 
 
 ## Urgent contact
 
-- **Primary:** post in the team Slack channel `#alerts-and-monitoring` and include `@channel`. Everyone on the team is in the channel, so this pings every member at once.
-- **Fallback if nobody answers within 1 hour:** phone, text, and/or email the PM: `Sara Santini`. Contact Information is available in Slack profile.
+- Management and the mentor can reach us at our CMU email addresses. We share those addresses privately. The first teammate to see an urgent message posts in `#alerts-and-monitoring` with `@channel` so everyone gets the same information.
+- If nobody acknowledges the message within one hour, the fallback is to email our PM, Sara Santini, directly.
 - **Outside the team:** contact the CMU course staff `Shantanu Shastri` when the VM, network, firewall or Kafka tunnel is the cause of the outage. Any security incident involving a potentially compromised VM must be reported immediately to CMU course staff. Contact Information is available in CMU Online Canvas.
-- **If Slack itself is down**, no alert will arrive: use the phone fallback above and check the dashboard and `/recommend/1` by hand.
+- **If Slack itself is down**, coordinate by CMU email and check the dashboard and `/recommend/1` by hand.
 
 
 

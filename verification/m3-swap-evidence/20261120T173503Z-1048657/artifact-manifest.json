@@ -1,0 +1,79 @@
+{
+  "code_revision": "0c6d935f5ad9b8ad69d5882e655deb3d41044b2c",
+  "created_at": "2026-11-20T17:35:25.922279+00:00",
+  "model": {
+    "path": "/app/models/updates/20261120T173503Z-1048657/candidate.npz",
+    "sha256": "6f87dded4169f4018ad9a3b38bfca1107dad621f32d93977b232a212ca851583",
+    "algorithm": "EASE",
+    "regularization": 100.0,
+    "min_rating": 6
+  },
+  "catalog": {
+    "events.csv.gz": {
+      "sha256": "5c61b29f1eab57ae0ff122062390e312f6813c4751eaab466997cdb55b712efb",
+      "expected_sha256": "5c61b29f1eab57ae0ff122062390e312f6813c4751eaab466997cdb55b712efb"
+    },
+    "users.csv.gz": {
+      "sha256": "7a7b2afbb598753af89cad7d865089d03dcaf0c834b2d42275f5918b97343809",
+      "expected_sha256": "7a7b2afbb598753af89cad7d865089d03dcaf0c834b2d42275f5918b97343809"
+    },
+    "movies.csv.gz": {
+      "sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147",
+      "expected_sha256": "1e0dd97dccaff8cfe65d888cbdaec33e4a2673880818fbc3dcf859dc7806b147"
+    }
+  },
+  "training": {
+    "window_start_inclusive": "2026-11-19T17:35:06.004615+00:00",
+    "window_end_exclusive": "2026-11-20T17:35:06.004615+00:00",
+    "actual_training_start": "2026-11-20T14:41:14+00:00",
+    "actual_training_end": "2026-11-20T17:03:06+00:00",
+    "reference_model_sha256": "929f3381822ab26b74cbfd81ebe5ebede2a3074d352aede6be0b2b75b6c135f5",
+    "source_id": "cmu-movielog",
+    "topic": "movielog2",
+    "partitions": {
+      "0": {
+        "tail_capped": true,
+        "highest_offset": 1659194264,
+        "lowest_offset": 1656449572
+      },
+      "1": {
+        "tail_capped": true,
+        "highest_offset": 1659234372,
+        "lowest_offset": 1655790635
+      }
+    },
+    "limits": {
+      "events": 200000,
+      "users": 5000,
+      "movies": 2000
+    },
+    "counts": {
+      "source_rows_read": 200000,
+      "outside_candidate_catalog": 34969,
+      "invalid_rows": 1144,
+      "users_with_cached_metadata": 4999,
+      "training_events": 10573,
+      "training_users": 5000,
+      "training_movies": 2000,
+      "interactions": 5628,
+      "source_events_exported": 198245,
+      "llm_attempts_exported": 4999
+    },
+    "llm_tail_capped": true,
+    "selection": "Most active users in a bounded per-partition tail; movie pool fixed using prior model popularity and movie ID. Missing cached descriptions are blank.",
+    "limits_note": "A bounded retained-event sample, not a complete stream window. Watch rows retain latest positions, not every minute or every viewing start. Usage is a bounded tail of recorded attempts in their current state; missing usage is not zero cost.",
+    "files": {
+      "users.csv.gz": "2bc05a2a22b0fb3e02bcbfad68f50c1917f66d33575f13ec6df9d6ddd74409b2",
+      "events.csv.gz": "d1820e3e9f7df35ee44c9585bb5a72fd6487246d2576dbfd2bf63295e537b258",
+      "catalog.csv.gz": "295055408df30df0ceb453ff35b32bae8713821d6264f67e2f760fd1a0edaad6",
+      "kafka_events.jsonl.gz": "b902400a9b5e0bf67113bfe75b6ff2bf42db2406468f90b99707a1e6f56d767a",
+      "llm_usage.jsonl.gz": "0f3c24d58fbe0a55a296882d7645aea679dc584cc776f90752060ce8f9c08aed",
+      "data-quality.json": "c2efe5b5deadc3f760612d298df5c79445a12a48d5d1695ebe8dd2e4491e60f4",
+      "movies.csv.gz": "b6151a2959e3135259d1f84daddc2509b452657eaccc4c6de394586b9a66a5f3"
+    },
+    "data_directory": "/app/models/updates/20261120T173503Z-1048657/data",
+    "dataset_version": "sha256:ee4a5122ac36b8b726416a48b2fdd552a0b2b630c0369ad6a9811ade86a161e1"
+  },
+  "previous_model_sha256": "929f3381822ab26b74cbfd81ebe5ebede2a3074d352aede6be0b2b75b6c135f5",
+  "slot": "blue"
+}

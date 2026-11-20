@@ -1,64 +1,67 @@
-# Milestone 3 — Monitoring and Continuous Experimentation
+# Milestone 3: Operating our recommendation service
 
-## Experimentation infrastructure
+## Model version switching
 
-The existing [gateway](src/api/gateway.py) assigns normalized user IDs to stable
-50/50 arms using a saved salted hash. [Tracking and analysis](M3_EXPERIMENTS.md)
-freeze the plan and serving IDs, retain assigned-arm requests and pre-compaction
-Kafka watches/ratings, and export a checksummed snapshot. Users, not requests or
-viewing minutes, are the independent analysis units. Two-sided Welch tests give
-treatment-minus-control effects, approximate 95% confidence intervals and p-values
-for per-user spending and per-rater mean ratings, allowing unequal variances.
-Users with no watches remain in spending denominators; absent ratings are not zero.
-Missing fees make full spending unknown, and rater selection limits satisfaction
-claims. Mean fee per watched user/movie unit is reported descriptively.
+In Milestone 1, one API container loaded the model and answered every request on port 8082. Replacing that container meant waiting for the new model to load before anybody could get a recommendation. We kept the same public address and put a gateway in front of two API containers, blue and green. Each loads its own model from a shared volume. This allows one to keep answering requests while we replace the other. [Deployment configuration](compose.yaml) · [Gateway](src/api/gateway.py)
 
-Both runs used one-hour follow-up: seven-hour enrollment for v1 and three-hour
-enrollment for v2. The gateway automatically returns traffic to control after
-eight/four hours. The [launcher](src/license_experiment.py) freezes shared weights,
-fees, coefficient, serving IDs and duration before exposure.
+Before switching traffic, we check that both slots are ready and send a recommendation request directly to the candidate. We verify that the request log contains the new model's hash, then replace the routing file in one operation. New requests pick up the change while requests already in progress can finish on their original slot. We repeat the check through the public gateway. If that check fails, the deployment script restores the previous routing file. [Switch and rollback](src/deployment.py) · [Request verification](src/model_update.py)
 
-## Experiment results
+## Regular model updates
 
-The [alternative](src/recommender.py) ranks eligible personalized EASE candidates by
-`score - penalty * validated_fee_USD` before top 20, with identical weights and
-unchanged exclusions/cold-start/popularity policies. Unknown fees use the maximum
-validated fee for ranking only, never for accounting.
+On November 20, 2026, we retrained EASE twice using events through 15:33 and 17:03 UTC, respectively. Both models returned 20 recommendations through the gateway. Across the two switch windows, the course logs recorded 10,209 requests for our server and zero failures. [Update script](scripts/update_model.sh)
 
-| Observed outcome | [v1: penalty 0.01, 8h](verification/m3-license-v1-results.json) | [v2: penalty 0.04, 4h](verification/m3-license-v2-results.json) |
-| --- | --- | --- |
-| Users, control/treatment | 67,859 / 67,759 | 54,488 / 54,258 |
-| Mean known watched fee, USD | 0.269475 / 0.265983 (-1.30%) | 0.259171 / 0.248301 (-4.19%) |
-| Fee coverage | 87.44% / 87.33% | 92.04% / 91.73% |
-| Raters, control/treatment | 1,599 / 1,687 | 1,618 / 1,593 |
-| Mean rating | 7.0075 / 7.0889 | 7.2074 / 7.1751 |
-| Rating difference [95% CI] | +0.0814 [-0.0230, +0.1859] | -0.0322 [-0.1393, +0.0748] |
-
-Full spending savings are **unknown** due to missing fees. Conditional on users
-with complete observed fees, spending/user changed by -$0.003370
-(95% CI [-$0.005239, -$0.001502]; p=0.000408) and -$0.011273
-([-$0.013408, -$0.009137]; p=4.55e-25). Neither rating change was conclusive
-(p=0.1266/0.5552); v2 supports its -0.5-point rating guardrail among raters, not
-the 10-20% full-spending goal. Separate periods/fee snapshots are not pooled.
-See [deployment, measurement, samples and limitations](M3_EXPERIMENTS.md).
-
-![Both live experiments: licensing costs and ratings](verification/m3-license-results.png)
+| Switch (UTC) | New model | Five minutes before | Five minutes after |
+| --- | --- | ---: | ---: |
+| [15:51:25, blue to green](verification/m3-swap-evidence/20261120T153340Z-1027900/deployment.json) | `929f3381` | 2,298 / 2,298 | [2,336 / 2,336](verification/m3-swap-evidence/20261120T153340Z-1027900/availability.json) |
+| [17:43:34, green to blue](verification/m3-swap-evidence/20261120T173503Z-1048657/deployment.json) | `6f87dded` | 2,763 / 2,763 | [2,812 / 2,812](verification/m3-swap-evidence/20261120T173503Z-1048657/availability.json) |
 
 ## Monitoring
 
-A [collector](src/monitoring.py) reads retained Kafka events and LLM attempts every five minutes. It publishes [Prometheus metrics](src/monitoring_api.py) for course request availability, subsequent-watch HitRate@20 with a one-hour follow-up, movie-license and Decisions costs, and drift against the M2 reference. Course availability counts failures and timeouts. License cost uses one fee per observed user/movie pair. LLM estimates count attempts once; missing usage or fees are shown as unknown. The gateway's readiness check is a separate signal.
+We check availability two ways. Prometheus probes the gateway every 15 seconds. Our collector reads the course Kafka logs about every five minutes to measure the fraction of requests for our server that returned HTTP 200. Grafana shows that ratio as stale if the logs do not cover the window. For online accuracy, a successful top-20 recommendation list counts as a hit if the same user watches any movie on it within an hour. [Prometheus configuration](monitoring/prometheus/prometheus.yml) · [Collector and metrics](src/monitoring.py)
 
-In a [November 14 VM sample](verification/m3-monitoring-2026-11-14.json), all 3,931 requests attributed to our server succeeded. HitRate@20 was 1.61% (112 of 6,947 eligible requests). Known license fees totaled $1,375.95 for 77.9% of observed pairs, so the full cost is unknown. Forty-six recorded Decisions attempts cost an estimated $0.00275. No strong drift was flagged.
+We estimate license cost by counting one fee per observed user/movie pair and show what fraction had a known fee. We estimate LLM cost from recorded token usage and API prices. For drift, we compare Kafka events and responses from the user, movie, and recommendation APIs with our M2 baseline. A total variation distance above 0.30 flags a strong shift. Our mentor can view Grafana over the CMU VPN. We will send the login details by email. [Drift checks](src/data_quality.py) · [Live dashboard](http://cmu-online-mlip-vm02.andrew.cmu.edu:3000/d/m3-production)
 
+We configured one automated alert. If the gateway readiness probe fails for two minutes or probe data goes missing, Grafana sends an `@channel` message to `#alerts-and-monitoring` with the trigger and the recovery instructions. [Alert rule](monitoring/grafana/provisioning/alerting/rules.yml) · [Slack delivery](monitoring/grafana/provisioning/alerting/contact-points.yml)
 
-See the [operating instructions](M3_OPERATIONS.md#monitoring). The recurring service, dashboard, alert delivery and screenshot are pending.
+![Production dashboard before the drill, showing gateway readiness, course availability, HitRate@20, known license and LLM costs, fee coverage, and drift.](verification/m3_drill/Drill_1.png)
+
+## Experimentation infrastructure
+
+We split users 50/50 between blue (control) and green (treatment). The gateway hashes the user ID with a salt saved for that experiment. This means that a user who comes back later gets the same assignment. Before enrollment, we record both serving versions, the split, the fee snapshot, and the end time. A user's first request starts one hour of follow-up. We log both the assigned and actual slot and keep the user in the assigned group even if a request fails or the other slot answers. [Assignment](src/routing.py) · [Experiment setup](src/license_experiment.py) · [Gateway log](src/api/gateway.py)
+
+We save Kafka watches and ratings before the database combines repeated watch events. For spending, we count each movie a user watches during follow-up once, including movies outside our recommendations. A user who watches nothing contributes zero. For satisfaction, we take the latest eligible 1–10 rating for each watched movie and average those ratings within each user. This gives somebody who rates ten movies the same weight as somebody who rates one. [Outcome capture](src/experiments/capture.py) · [Scoring](src/experiments/analysis.py)
+
+We compare the group means with two-sided Welch t-tests and report the treatment-minus-control difference, a 95% confidence interval, and a p-value. We use one observation per user because we assigned users to groups and their repeated watches are related. Welch's test allows the groups to have different variances. We fixed enrollment at seven hours for the first run and three for the second, then allowed another hour for the last users to finish follow-up. Its saved snapshot can be analyzed again with the same requests, outcomes, and fees. [Analysis and reproduction instructions](M3_EXPERIMENTS.md#export-reproduce-and-finish)
+
+## Experiment results
+
+We tested whether we could get users to watch cheaper movies without lowering their ratings. Both groups used the same EASE weights. For personalized recommendations, green subtracted the movie's license fee in dollars times 0.01 in the first run and 0.04 in the second before selecting the top 20. Both groups kept the same cold-start and popularity rules. [Ranking implementation](src/recommender.py)
+
+The mean known fee per watched movie was 1.30% lower in the first treatment group and 4.19% lower in the second. In the second run, users whose watches all had known fees cost about 1.13 cents less per user (95% CI, 0.91 to 1.34 cents less). Fees were missing for about 8% of watched pairs in that run, so we could not establish our target of 10% lower total spending. Among users who rated movies, the treatment averaged 0.081 points higher in the first run. In the second, treatment averaged 7.18 compared with 7.21 for control. The estimated difference was −0.032 points (95% CI, −0.139 to +0.075). That interval includes zero, and even its lower end is above the half-point drop we set as our limit. [First run](verification/m3-license-v1-results.json) · [Second run](verification/m3-license-v2-results.json)
+
+![Licensing costs and submitted ratings in both production experiments, with sample sizes, fee coverage, confidence intervals, and p-values.](verification/m3-license-results.png)
 
 ## Provenance
 
-The [API](src/api/routes.py) returns a request ID. Its request log records the model hash and whether the response used EASE, a cold-start profile, or a fallback. New serving IDs also include ranking settings, so two policies can share the same model file and still be distinct. A [serving manifest](src/provenance.py) links that ID to the model artifact, training Git commit, EASE settings, and the exact input files on the VM. [Model updates](src/deployment.py) preserve the candidate and its training snapshot when slots are replaced.
+Every successful response includes an `x-request-id`. We use it to look up the recommendation list, how it was produced, the model's SHA-256 hash, and the serving version in SQLite. The serving version includes the ranking settings, which matters here because the two experimental models used the same weights. Its manifest points to the saved model, EASE parameters, training code revision, and exact training files. We keep a copy of the candidate and training snapshot for each update so a later switch does not overwrite them. [Request logging](src/api/request_logging.py) · [Manifest and lookup](src/provenance.py)
 
-We [traced request `99e1dd9574f244268007f8a5f129d64f`](verification/m3-provenance-2026-11-14.json) from the November 13 production switch. It returned 20 EASE recommendations from artifact `f5ec8dee…`, trained by [commit `dd65775`](https://github.com/Revenge-of-the-Fit/RecommendationModel/commit/dd657753cf83d152670e203b2d7d18594bd9b209)
-with regularization 100 and minimum rating 6. The exact snapshot is
-`/app/models/updates/20261113T111208Z-3885278/data`; all three file hashes and the artifact hash matched on the VM. 
+For example, request `fa6097a09a134893b7dcd5d72dc2cb8a` returned 20 movies through the gateway after the second switch. The request identified serving version `d996f251` and model `6f87dded`. We trained that model at commit `0c6d935` using EASE with regularization 100 and a minimum positive rating of 6. The exact inputs are `events.csv.gz`, `movies.csv.gz`, and `users.csv.gz` under `/app/models/updates/20261120T173503Z-1048657/data` on the VM. The archived manifest gives the full hash of each file. [Public request](verification/m3-swap-evidence/20261120T173503Z-1048657/deployment.json) · [Training manifest](verification/m3-swap-evidence/20261120T173503Z-1048657/artifact-manifest.json) · [Trainer at that commit](https://github.com/Revenge-of-the-Fit/RecommendationModel/blob/0c6d935f5ad9b8ad69d5882e655deb3d41044b2c/src/train.py)
 
-[Lookup and retrieval instructions](M3_OPERATIONS.md#provenance) show how to repeat it with another request ID. This past request predates the new serving IDs, so the model lineage is verified and the ranking settings were not logged for that request.
+From `/home/production` on the VM, run the following lookup with any retained recommendation's request ID. It checks the model and training files against their saved hashes. [Example of a verified lookup](verification/m3-provenance-2026-11-14.json)
+
+```bash
+sudo docker compose --project-name recommendationmodel exec -T api \
+  python src/provenance.py fa6097a09a134893b7dcd5d72dc2cb8a
+```
+
+## Incident response plan and drill
+
+Management can reach our team by email. The first teammate to see an urgent request alerts the rest of us in Slack. The first person to acknowledge the incident leads the response, the engineer responsible for the affected service handles recovery, and we keep updates in one Slack thread. [Team incident response plan](INCIDENT_RESPONSE.md)
+
+On November 20 at about 01:17 UTC, we set a four-minute restart timer and stopped the gateway. Grafana showed the gateway down while the course-log panel still showed 100% for its earlier window. At 01:19 UTC the readiness alert fired, and William Blackwood saw the message in Slack. By 01:22 UTC, `/recommend/1` was returning HTTP 200 again and Slack had delivered the resolved alert. [Gateway stop](verification/m3_drill/Drill_2.png) · [Detection](verification/m3_drill/Drill_4.png) · [Recovered request](verification/m3_drill/Drill_8.png) · [Resolved alert](verification/m3_drill/Drill_9.png)
+
+![The firing Slack alert William received, with the failed condition, what to check, and links to the runbook and dashboard.](verification/m3_drill/Drill_3.png)
+
+## Team contract update
+
+no update to team contract
