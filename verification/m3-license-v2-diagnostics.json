@@ -1,0 +1,51 @@
+{
+  "kind": "Exploratory design diagnostics; not a new experiment result or predicted ratings",
+  "source_experiment": "license-v1",
+  "model_sha256": "f5ec8deec7698169786ec327ce77aa83a7aa8afe8a990bf2f43baa6efbd58215",
+  "fees_sha256": "5761e89df23a41b3bc3bfa0066564e1c8257f1965b34071069fed789a5420a1e",
+  "live_attribution_sample": {
+    "selection": "2,000 users per arm, fixed SHA-256 ordering of license-v1-diagnostic:user_id; first enrolled request",
+    "scope": "Distinct watched user/movie units within the original one-hour follow-up; first-slate attribution only",
+    "control": {
+      "sampled_users": 2000,
+      "backend_records_found": 2000,
+      "watched_units": 2051,
+      "watched_units_in_first_slate": 1202,
+      "mean_known_recommended_fee_usd": 0.32554835892593953,
+      "mean_known_first_rank_fee_usd": 0.3364048192634975,
+      "mean_known_recommended_watch_fee_usd": 0.32411093392678697,
+      "mean_known_outside_slate_watch_fee_usd": 0.14744446721449997
+    },
+    "treatment": {
+      "sampled_users": 2000,
+      "backend_records_found": 2000,
+      "watched_units": 2054,
+      "watched_units_in_first_slate": 1161,
+      "mean_known_recommended_fee_usd": 0.3050491425994348,
+      "mean_known_first_rank_fee_usd": 0.32441660591489707,
+      "mean_known_recommended_watch_fee_usd": 0.314528082352195,
+      "mean_known_outside_slate_watch_fee_usd": 0.15518401834740153
+    }
+  },
+  "training_profile_replay": {
+    "users": 500,
+    "seed": 42,
+    "control_mean_recommended_fee_usd": 0.32743051132379997,
+    "candidates": [
+      {"penalty_per_usd": 0.01, "slate_fee_reduction_percent": 11.220523567212071, "original_score_retained_percent": 99.52246155633311, "top20_overlap": 0.8786},
+      {"penalty_per_usd": 0.02, "slate_fee_reduction_percent": 19.030595992191735, "original_score_retained_percent": 97.72747963847023, "top20_overlap": 0.8092},
+      {"penalty_per_usd": 0.04, "slate_fee_reduction_percent": 35.26507276463362, "original_score_retained_percent": 90.29752516244758, "top20_overlap": 0.6666},
+      {"penalty_per_usd": 0.06, "slate_fee_reduction_percent": 53.11113572603382, "original_score_retained_percent": 76.8068814456957, "top20_overlap": 0.502},
+      {"penalty_per_usd": 0.1, "slate_fee_reduction_percent": 77.24140062316988, "original_score_retained_percent": 48.91827734310803, "top20_overlap": 0.2633}
+    ]
+  },
+  "proposed_follow_up": {
+    "experiment_id": "license-v2",
+    "penalty_per_usd": 0.06,
+    "maximum_rating_decline_points": 0.5,
+    "minimum_cost_reduction_fraction": 0.1,
+    "desired_cost_reduction_fraction": 0.2,
+    "status": "Prepared in source only; not deployed, registered or started",
+    "limitation": "Neither watched-cost reduction nor the rating guardrail is guaranteed by EASE-score replay"
+  }
+}

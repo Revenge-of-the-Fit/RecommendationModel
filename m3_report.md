@@ -13,29 +13,36 @@ Users with no watches remain in spending denominators; absent ratings are not ze
 Missing fees make full spending unknown, and rater selection limits satisfaction
 claims. Mean fee per watched user/movie unit is reported descriptively.
 
-The [eight-hour protocol](M3_EXPERIMENTS.md#assignment-and-outcomes)
-enrolls for seven hours and follows each user for one hour, then automatically
-returns traffic to control. Preparation archives the same EASE weights for both
-arms and broadens/fixes the fee snapshot before registration. Configurations remain
-fixed through follow-up. The [launcher](src/license_experiment.py) verifies the
-shared artifact, fee checksum, ranking settings and serving provenance.
+Both runs used one-hour follow-up: seven-hour enrollment for v1 and three-hour
+enrollment for v2. The gateway automatically returns traffic to control after
+eight/four hours. The [launcher](src/license_experiment.py) freezes shared weights,
+fees, coefficient, serving IDs and duration before exposure.
 
 ## Experiment results
 
-The [implemented alternative](src/recommender.py) subtracts **0.01 × validated
-licensing fee in USD** from eligible personalized EASE scores before selecting
-top 20, with unchanged weights, exclusions and cold-start/popularity policies.
-Unknown fees receive the maximum validated snapshot fee as a conservative ranking
-penalty only; they remain unknown for spending analysis. This coefficient trades
-0.003 EASE score units for a $0.30 fee difference and does not guarantee unchanged
-ratings.
+The [alternative](src/recommender.py) ranks eligible personalized EASE candidates by
+`score - penalty * validated_fee_USD` before top 20, with identical weights and
+unchanged exclusions/cold-start/popularity policies. Unknown fees use the maximum
+validated fee for ranking only, never for accounting.
 
-In a [read-only replay of 500 training profiles](verification/m3-license-policy-replay-2026-11-19.json),
-mean recommended-slate fees fell from $0.327431 to $0.290691 (11.2%); top-20
-overlap was 87.86% and mean original EASE score retention was 99.52%. These are
-ranking diagnostics, not watched-movie savings or observed ratings. The live
-experiment has not run, so cost/rating effects, statistical confidence and the
-results screenshot are not yet available.
+| Observed outcome | [v1: penalty 0.01, 8h](verification/m3-license-v1-results.json) | [v2: penalty 0.04, 4h](verification/m3-license-v2-results.json) |
+| --- | --- | --- |
+| Users, control/treatment | 67,859 / 67,759 | 54,488 / 54,258 |
+| Mean known watched fee, USD | 0.269475 / 0.265983 (-1.30%) | 0.259171 / 0.248301 (-4.19%) |
+| Fee coverage | 87.44% / 87.33% | 92.04% / 91.73% |
+| Raters, control/treatment | 1,599 / 1,687 | 1,618 / 1,593 |
+| Mean rating | 7.0075 / 7.0889 | 7.2074 / 7.1751 |
+| Rating difference [95% CI] | +0.0814 [-0.0230, +0.1859] | -0.0322 [-0.1393, +0.0748] |
+
+Full spending savings are **unknown** due to missing fees. Conditional on users
+with complete observed fees, spending/user changed by -$0.003370
+(95% CI [-$0.005239, -$0.001502]; p=0.000408) and -$0.011273
+([-$0.013408, -$0.009137]; p=4.55e-25). Neither rating change was conclusive
+(p=0.1266/0.5552); v2 supports its -0.5-point rating guardrail among raters, not
+the 10-20% full-spending goal. Separate periods/fee snapshots are not pooled.
+See [deployment, measurement, samples and limitations](M3_EXPERIMENTS.md).
+
+![Both live experiments: licensing costs and ratings](verification/m3-license-results.png)
 
 ## Monitoring
 

@@ -3,6 +3,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -116,7 +117,16 @@ def freeze_fees(catalog, storage, output, metadata_url):
     }
 
 
-def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, refresh=True):
+def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, refresh=True,
+            penalty=PENALTY, rating_decline_margin=0.5, enrollment_hours=7, follow_up_hours=1):
+    if isinstance(penalty, bool) or not math.isfinite(penalty) or penalty <= 0:
+        raise ValueError("Penalty must be positive and finite")
+    if (isinstance(rating_decline_margin, bool) or not math.isfinite(rating_decline_margin)
+            or not 0 <= rating_decline_margin <= 9):
+        raise ValueError("Rating decline margin must be finite and between 0 and 9 points")
+    if any(isinstance(hours, bool) or not math.isfinite(hours) or hours <= 0
+           for hours in (enrollment_hours, follow_up_hours)):
+        raise ValueError("Enrollment and follow-up hours must be positive and finite")
     directory = Path(directory)
     archive = assets_path(directory, experiment_id)
     routing = read_routing(directory / "routing.json")
@@ -155,16 +165,28 @@ def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, 
         specification = {
             "id": experiment_id, "prepared_at": datetime.now(timezone.utc).isoformat(),
             "model_sha256": digest, "fees_sha256": sha256(stage / "fees.csv"),
-            "penalty_per_usd": PENALTY, "fee_reference": reference,
-            "enrollment_hours": 7, "follow_up_hours": 1, "control_slot": "blue",
+            "penalty_per_usd": penalty, "fee_reference": reference,
+            "decision_rule": {
+                "minimum_cost_reduction_fraction": 0.1,
+                "desired_cost_reduction_fraction": 0.2,
+                "maximum_rating_decline_points": rating_decline_margin,
+                "cost_population": "All assigned users; full spending effect requires complete watched-fee coverage",
+                "ratings_population": "Observed raters only",
+                "rating_criterion": "Lower endpoint of the two-sided 95% rating-difference CI must exceed the negative decline margin",
+                "cost_criterion": "Full spend per assigned user declines by at least 10%, with its 95% difference CI below zero; 20% is a goal, not a guarantee",
+                "missing_fee_criterion": "If any watched fees are unknown, the full-spending target is not established; report conditional known-fee estimates separately",
+                "interpretation": "Fixed before enrollment; no retuning or early stopping based on significance",
+            },
+            "enrollment_hours": enrollment_hours, "follow_up_hours": follow_up_hours, "control_slot": "blue",
             "control_description": "Current EASE, no licensing penalty",
             "treatment_description": (
-                "Same EASE weights; eligible personalized score minus 0.01 * fee_USD before top 20; "
+                f"Same EASE weights; eligible personalized score minus {penalty:g} * fee_USD before top 20; "
                 "unknown fee uses maximum validated snapshot fee for ranking only; "
                 "unchanged cold-start/popularity policies"
             ),
         }
         write_json(stage / "specification.json", specification)
+        (stage / "specification.sha256").write_text(sha256(stage / "specification.json") + "\n")
         if read_routing(directory / "routing.json") != routing:
             raise ValueError("Routing changed during preparation")
         os.rename(stage, archive)
@@ -174,7 +196,17 @@ def prepare(directory, experiment_id, fees_path, storage_path, metadata_url, *, 
 def specification(directory, experiment_id):
     archive = assets_path(directory, experiment_id)
     spec = json.loads((archive / "specification.json").read_text())
-    if (spec["id"] != experiment_id or spec["penalty_per_usd"] != PENALTY
+    digest_file = archive / "specification.sha256"
+    if digest_file.exists():
+        if digest_file.read_text().strip() != sha256(archive / "specification.json"):
+            raise ValueError("Frozen experiment specification changed")
+    elif spec["penalty_per_usd"] != PENALTY:
+        raise ValueError("Legacy unsealed specifications support only the original penalty")
+    penalty = spec["penalty_per_usd"]
+    if (isinstance(penalty, bool) or not isinstance(penalty, (int, float))
+            or not math.isfinite(penalty) or penalty <= 0):
+        raise ValueError("Frozen experiment penalty must be positive and finite")
+    if (spec["id"] != experiment_id
             or sha256(archive / "fees.csv") != spec["fees_sha256"]
             or sha256(archive / "recommender.npz") != spec["model_sha256"]):
         raise ValueError("Frozen experiment assets changed")
@@ -214,7 +246,7 @@ def start(directory, capture_directory, storage_path, experiment_id, *, clock=No
         raise ValueError("Both arms must use the same serving catalog")
     control, treatment = (health[slot]["ranking"] for slot in ("blue", "green"))
     licensing = treatment.get("licensing", {})
-    if (control.get("licensing") or licensing.get("penalty_per_usd") != PENALTY
+    if (control.get("licensing") or licensing.get("penalty_per_usd") != spec["penalty_per_usd"]
             or licensing.get("fees_sha256") != spec["fees_sha256"]
             or {key: value for key, value in treatment.items() if key != "licensing"} != control):
         raise ValueError("Only the pre-specified licensing policy may differ between arms")
@@ -223,7 +255,8 @@ def start(directory, capture_directory, storage_path, experiment_id, *, clock=No
     clock = clock or datetime.now(timezone.utc)
     plan = start_experiment(
         directory, capture_directory, storage_path, experiment_id=experiment_id,
-        start=clock + timedelta(minutes=3), enrollment_hours=7, follow_up_hours=1,
+        start=clock + timedelta(minutes=3), enrollment_hours=spec["enrollment_hours"],
+        follow_up_hours=spec["follow_up_hours"],
         control_slot="blue", control_description=spec["control_description"],
         treatment_description=spec["treatment_description"], fees_path=archive / "fees.csv",
         fee_column="license_cost", clock=clock,
@@ -233,7 +266,7 @@ def start(directory, capture_directory, storage_path, experiment_id, *, clock=No
     return plan
 
 
-def replay(model_path, fees_path):
+def replay(model_path, fees_path, *, penalty=PENALTY):
     """A relevance/cost diagnostic, not an estimate of held-out ratings or watches."""
     model = EaseRecommender.load(model_path)
     fees, _ = load_licensing_fees(fees_path)
@@ -242,7 +275,7 @@ def replay(model_path, fees_path):
         raise ValueError("Replay requires users with positive training history")
     users = np.random.default_rng(42).choice(eligible, min(500, len(eligible)), replace=False)
     control = {int(user): model.recommend(int(user), 20)["movie_id"].tolist() for user in users}
-    model.configure_licensing_penalty(fees_path, PENALTY)
+    model.configure_licensing_penalty(fees_path, penalty)
     costs, relevance, overlaps, unknown = [[], []], [[], []], [], [0, 0]
     for user in users:
         slates = (control[int(user)], model.recommend(int(user), 20)["movie_id"].tolist())
@@ -257,7 +290,7 @@ def replay(model_path, fees_path):
     return {
         "kind": "Read-only training-profile replay; NOT held-out quality, watched costs, or live ratings",
         "model_sha256": sha256(model_path), "fees_sha256": sha256(fees_path),
-        "seed": 42, "users": len(users), "penalty_per_usd": PENALTY,
+        "seed": 42, "users": len(users), "penalty_per_usd": penalty,
         "mean_top20_overlap": float(np.mean(overlaps)), "unknown_recommended_fees": unknown,
         "mean_recommended_fee_usd": [
             float(np.mean(values)) if values and all(value is not None for value in values) else None
@@ -278,6 +311,10 @@ def main(argv=None):
     preparation.add_argument("--fees", type=Path, default="/app/data/movies.csv.gz")
     preparation.add_argument("--metadata-url", default=os.environ.get("METADATA_BASE_URL", "http://128.2.24.239:8080"))
     preparation.add_argument("--no-refresh", action="store_true", help="Use an already broadened validated fee snapshot")
+    preparation.add_argument("--penalty", type=float, default=PENALTY, help="Fixed EASE score penalty per licensing dollar")
+    preparation.add_argument("--rating-decline-margin", type=float, default=0.5, help="Maximum acceptable mean rating decline, frozen before enrollment")
+    preparation.add_argument("--enrollment-hours", type=float, default=7)
+    preparation.add_argument("--follow-up-hours", type=float, default=1)
     staging = commands.add_parser("stage")
     staging.add_argument("--id", required=True)
     staging.add_argument("--slot", choices=("blue", "green"), required=True)
@@ -286,16 +323,20 @@ def main(argv=None):
     diagnostic = commands.add_parser("replay")
     diagnostic.add_argument("--model", type=Path, required=True)
     diagnostic.add_argument("--fees", type=Path, required=True)
+    diagnostic.add_argument("--penalty", type=float, default=PENALTY)
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":
-            result = prepare(args.directory, args.id, args.fees, args.storage_path, args.metadata_url, refresh=not args.no_refresh)
+            result = prepare(args.directory, args.id, args.fees, args.storage_path, args.metadata_url,
+                             refresh=not args.no_refresh, penalty=args.penalty,
+                             rating_decline_margin=args.rating_decline_margin,
+                             enrollment_hours=args.enrollment_hours, follow_up_hours=args.follow_up_hours)
         elif args.command == "stage":
             result = stage_slot(args.directory, args.id, args.slot)
         elif args.command == "start":
             result = start(args.directory, args.capture_directory, args.storage_path, args.id)
         else:
-            result = replay(args.model, args.fees)
+            result = replay(args.model, args.fees, penalty=args.penalty)
         print(json.dumps(result, indent=2, allow_nan=False))
     except (ValueError, OSError, KeyError, sqlite3.Error) as error:
         parser.exit(1, f"License experiment stopped ({type(error).__name__}): {error}\n")
