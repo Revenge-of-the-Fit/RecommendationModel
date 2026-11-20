@@ -1,0 +1,15 @@
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: slack-team
+    receivers:
+      - uid: slack-team
+        type: slack
+        disableResolveMessage: false
+        settings:
+          # Grafana adds the Slack broadcast mention itself (a pretext Slack is told to parse).
+          mentionChannel: channel
+          # Incoming-webhook URL comes from the private .env, never from Git.
+          url: $__env{SLACK_WEBHOOK_URL}
+          title: '{{ template "m3_title" . }}'
+          text: '{{ template "m3_alert" . }}'
