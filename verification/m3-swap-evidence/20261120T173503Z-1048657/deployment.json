@@ -1,0 +1,49 @@
+{
+  "status": "deployed",
+  "started_at": "2026-11-20T17:43:34.948937+00:00",
+  "previous_routing": {
+    "primary": "green",
+    "secondary_percent": 0,
+    "salt": "c765ad16d1654f85b674e126035c55f0",
+    "generation": "74cdf28ed13d4c089094007e15a9ad14"
+  },
+  "routing": {
+    "primary": "blue",
+    "secondary_percent": 0,
+    "salt": "c765ad16d1654f85b674e126035c55f0",
+    "generation": "d94ee3626a7e498c8cea9a5e842fa5d6"
+  },
+  "versions": {
+    "blue": "sha256:6f87dded4169f4018ad9a3b38bfca1107dad621f32d93977b232a212ca851583",
+    "green": "sha256:929f3381822ab26b74cbfd81ebe5ebede2a3074d352aede6be0b2b75b6c135f5"
+  },
+  "candidate_probe": {
+    "status": "deployed",
+    "request_id": "3c4285ed9dea474c8a31a7f2a59b7fb6",
+    "model_version": "sha256:6f87dded4169f4018ad9a3b38bfca1107dad621f32d93977b232a212ca851583",
+    "served_version": "sha256:d996f2514d01bc5ce9759aa417c7ed921b0e21da4338952aafaf8ed8ea67ba52",
+    "previous_model_sha256": "929f3381822ab26b74cbfd81ebe5ebede2a3074d352aede6be0b2b75b6c135f5",
+    "http_ms": 4.981,
+    "recommendations": 20,
+    "data_directory": "/app/models/updates/20261120T173503Z-1048657/data",
+    "training_start": "2026-11-20T14:41:14+00:00",
+    "training_end": "2026-11-20T17:03:06+00:00"
+  },
+  "evidence_path": "/app/models/updates/20261120T173503Z-1048657/deployment.json",
+  "switched_at": "2026-11-20T17:43:34.950492+00:00",
+  "public_probes": {
+    "blue": {
+      "status": "deployed",
+      "request_id": "fa6097a09a134893b7dcd5d72dc2cb8a",
+      "model_version": "sha256:6f87dded4169f4018ad9a3b38bfca1107dad621f32d93977b232a212ca851583",
+      "served_version": "sha256:d996f2514d01bc5ce9759aa417c7ed921b0e21da4338952aafaf8ed8ea67ba52",
+      "previous_model_sha256": "929f3381822ab26b74cbfd81ebe5ebede2a3074d352aede6be0b2b75b6c135f5",
+      "http_ms": 11.941,
+      "recommendations": 20,
+      "data_directory": "/app/models/updates/20261120T173503Z-1048657/data",
+      "training_start": "2026-11-20T14:41:14+00:00",
+      "training_end": "2026-11-20T17:03:06+00:00"
+    }
+  },
+  "finished_at": "2026-11-20T17:43:35.167760+00:00"
+}

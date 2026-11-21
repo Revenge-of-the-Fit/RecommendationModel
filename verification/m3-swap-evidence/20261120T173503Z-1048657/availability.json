@@ -1,0 +1,59 @@
+{
+  "deployment": "/app/models/updates/20261120T173503Z-1048657/deployment.json",
+  "collected_at": "2026-11-20T18:05:38.525196+00:00",
+  "server": "cmu-online-mlip-vm02.andrew.cmu.edu:8082",
+  "source_id": "cmu-movielog",
+  "topic": "movielog2",
+  "start": "2026-11-20T17:38:34.950492+00:00",
+  "switch": "2026-11-20T17:43:34.950492+00:00",
+  "end": "2026-11-20T17:48:34.950492+00:00",
+  "definition": "Course Kafka status 200 / all recommendation requests for this exact server",
+  "coverage": {
+    "0": {
+      "rows_read": 250000,
+      "oldest_event": "2026-11-20T09:44:32.069270+00:00",
+      "newest_event": "2026-11-20T17:50:10+00:00",
+      "lowest_offset": 1650577171,
+      "highest_offset": 1660574949,
+      "window_bracketed": true
+    },
+    "1": {
+      "rows_read": 250000,
+      "oldest_event": "2026-11-20T11:19:49+00:00",
+      "newest_event": "2026-11-20T17:53:35+00:00",
+      "lowest_offset": 1652133416,
+      "highest_offset": 1660675472,
+      "window_bracketed": true
+    }
+  },
+  "unattributable_recommendations": 0,
+  "window_bracketed": true,
+  "overall": {
+    "requests": 5575,
+    "successful": 5575,
+    "failed": 0,
+    "availability": 1.0,
+    "statuses": {
+      "200": 5575
+    }
+  },
+  "before": {
+    "requests": 2763,
+    "successful": 2763,
+    "failed": 0,
+    "availability": 1.0,
+    "statuses": {
+      "200": 2763
+    }
+  },
+  "after": {
+    "requests": 2812,
+    "successful": 2812,
+    "failed": 0,
+    "availability": 1.0,
+    "statuses": {
+      "200": 2812
+    }
+  },
+  "usable": true
+}
